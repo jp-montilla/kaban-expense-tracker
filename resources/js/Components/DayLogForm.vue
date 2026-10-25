@@ -89,7 +89,7 @@ watch(() => form.items.map((line) => `${line.via_credit}:${line.amount}:${line.c
             line.via_credit = false
         }
 
-        if (line.via_credit && line.credit_months === 1) {
+        if (line.via_credit && Number(line.credit_months) === 1) {
             line.credit_monthly = line.amount
         }
     }
@@ -153,24 +153,28 @@ function itemError(index: number): string | undefined {
         </label>
 
         <div class="grid gap-3">
-            <div v-for="(line, index) in form.items" :key="line.key" class="grid gap-2 rounded-lg border border-line p-3">
-                <div class="grid gap-2 sm:grid-cols-[1fr_8rem_7rem_auto] sm:items-end">
-                    <label class="grid gap-1">
-                        <span class="kicker">Item</span>
-                        <input v-model="line.description" type="text" required maxlength="500" class="field" placeholder="Taho, gas, grocery">
-                    </label>
-                    <label class="grid gap-1">
-                        <span class="kicker">Amount</span>
-                        <input v-model="line.amount" type="number" required min="0.01" step="0.01" inputmode="decimal" class="field" placeholder="0.00">
-                    </label>
-                    <label class="grid gap-1">
-                        <span class="kicker">Kind</span>
-                        <select v-model="line.type" class="field">
-                            <option value="daily">Expense</option>
-                            <option value="refund">Money back</option>
-                        </select>
-                    </label>
-                    <button type="button" class="btn-ghost text-clay" @click="removeItem(index)">Remove</button>
+            <div v-for="(line, index) in form.items" :key="line.key" class="grid gap-2 rounded-lg border border-line p-2.5 md:p-3">
+                <div class="flex items-start gap-2">
+                    <div class="grid min-w-0 flex-1 gap-2 md:grid-cols-[minmax(0,1fr)_8rem_9rem] md:items-end">
+                        <label class="grid gap-1">
+                            <span class="kicker">Item</span>
+                            <input v-model="line.description" type="text" required maxlength="500" class="field" placeholder="Taho, gas, grocery">
+                        </label>
+                        <div class="grid grid-cols-2 gap-2 md:contents">
+                            <label class="grid gap-1">
+                                <span class="kicker">Amount</span>
+                                <input v-model="line.amount" type="number" required min="0.01" step="0.01" inputmode="decimal" class="field" placeholder="0.00">
+                            </label>
+                            <label class="grid gap-1">
+                                <span class="kicker">Kind</span>
+                                <select v-model="line.type" class="field">
+                                    <option value="daily">Expense</option>
+                                    <option value="refund">Money back</option>
+                                </select>
+                            </label>
+                        </div>
+                    </div>
+                    <button type="button" class="mt-6 shrink-0 text-sm text-clay hover:text-ink" @click="removeItem(index)">Remove</button>
                 </div>
                 <CreditTerms
                     v-if="line.type === 'daily'"
@@ -179,6 +183,7 @@ function itemError(index: number): string | undefined {
                     v-model:months="line.credit_months"
                     v-model:monthly="line.credit_monthly"
                     :credits="credits"
+                    :occurred-on="form.occurred_on"
                 />
                 <p v-if="itemError(index)" class="text-sm text-clay">{{ itemError(index) }}</p>
             </div>

@@ -98,6 +98,7 @@ const walletForm = useForm({
     name: '',
     group: 'wallet' as WalletGroup,
     due_day: 15 as number | null,
+    cutoff_day: 5 as number | null,
     plans: emptyPlans() as WalletPlan[],
 })
 
@@ -366,6 +367,7 @@ function openAddWallet(group: WalletGroup) {
     walletForm.reset()
     walletForm.group = group
     walletForm.due_day = group === 'credit' ? 15 : null
+    walletForm.cutoff_day = group === 'credit' ? 5 : null
     walletForm.plans = group === 'credit' ? emptyPlans() : []
     walletForm.clearErrors()
     showWallet.value = true
@@ -380,6 +382,7 @@ function openEditWallet(row: WalletRow) {
     walletForm.name = row.name
     walletForm.group = row.group
     walletForm.due_day = row.due_day
+    walletForm.cutoff_day = row.cutoff_day
     walletForm.plans = row.group === 'credit'
         ? row.plans.map((plan) => ({ ...plan }))
         : []
@@ -616,7 +619,7 @@ function savePassword() {
                             <p>
                                 <span class="font-medium">{{ wallet.name }}</span>
                                 <span v-if="wallet.group === 'credit'" class="ml-2 text-xs text-moss">
-                                    Due day {{ wallet.due_day }}
+                                    Due {{ wallet.due_day }} · cutoff {{ wallet.cutoff_day }}
                                 </span>
                                 <span v-else-if="wallet.locked" class="ml-2 text-xs text-moss">Always available</span>
                             </p>
@@ -762,10 +765,17 @@ function savePassword() {
                     <span class="kicker">Name</span>
                     <input v-model="walletForm.name" required class="field" :placeholder="walletForm.group === 'credit' ? 'SPay, LazPay, BDO CC' : walletForm.group === 'bank' ? 'UnionBank, Debit' : 'GCash, Gotyme, Maya'">
                 </label>
-                <label v-if="walletForm.group === 'credit'" class="grid gap-1">
-                    <span class="kicker">Due day</span>
-                    <input v-model.number="walletForm.due_day" type="number" min="1" max="28" required class="field">
-                </label>
+                <div v-if="walletForm.group === 'credit'" class="grid grid-cols-2 gap-2">
+                    <label class="grid gap-1">
+                        <span class="kicker">Due day</span>
+                        <input v-model.number="walletForm.due_day" type="number" min="1" max="28" required class="field">
+                    </label>
+                    <label class="grid gap-1">
+                        <span class="kicker">Cutoff day</span>
+                        <input v-model.number="walletForm.cutoff_day" type="number" min="1" max="28" required class="field">
+                    </label>
+                    <p class="col-span-2 text-xs text-moss">Buys on or after cutoff land on next month's due.</p>
+                </div>
                 <button class="btn w-fit" :disabled="walletForm.processing">Save</button>
             </form>
         </Modal>

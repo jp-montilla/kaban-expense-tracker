@@ -23,6 +23,7 @@ class WalletRequest extends FormRequest
             'name' => [$updating ? 'sometimes' : 'required', 'string', 'max:40'],
             'group' => [$updating ? 'sometimes' : 'nullable', 'string', Rule::in(['wallet', 'credit', 'bank'])],
             'due_day' => ['nullable', 'integer', 'min:1', 'max:28'],
+            'cutoff_day' => ['nullable', 'integer', 'min:1', 'max:28'],
             'plans' => ['nullable', 'array', 'max:12'],
             'plans.*.id' => ['nullable', 'string', 'max:40'],
             'plans.*.months' => ['required_with:plans', 'integer', 'min:1', 'max:60'],

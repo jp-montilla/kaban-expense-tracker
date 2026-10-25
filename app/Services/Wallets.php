@@ -43,7 +43,7 @@ class Wallets
     }
 
     /**
-     * @return list<array{id: string, name: string, slug: string, due_day: int|null}>
+     * @return list<array{id: string, name: string, slug: string, due_day: int|null, cutoff_day: int|null}>
      */
     public function credits(): array
     {
@@ -53,28 +53,34 @@ class Wallets
                 'name' => $row['name'],
                 'slug' => $row['slug'],
                 'due_day' => $row['due_day'],
+                'cutoff_day' => $row['cutoff_day'],
             ],
             array_filter($this->all(), fn (array $row): bool => $row['group'] === 'credit'),
         ));
     }
 
     /**
+     * First installment due date from the purchase (or order-received) day.
+     *
+     * SPayLater (due 15): Shopee bills ~10 days before due, so the statement
+     * cuts on the 5th. A June 5 order is due July 15, not June 15.
+     * LazPayLater (due 16): the statement is the calendar month, due the 16th
+     * of the next month. An October buy is always November 16.
+     *
+     * Buys on/after cutoff_day this month land on next month's due_day.
+     *
      * @param  array<string, mixed>  $wallet
      */
     public function firstDueOn(array $wallet, string $on): string
     {
         $occurred = CarbonImmutable::parse($on)->startOfDay();
         $month = $occurred->startOfMonth();
-        $day = $this->dueDay($wallet['due_day'] ?? ($wallet['slug'] === 'lazpay' ? 16 : 15));
-        $thisBill = $month->day(min($day, $month->endOfMonth()->day));
+        $dueDay = $this->dueDay($wallet['due_day'] ?? ($wallet['slug'] === 'lazpay' ? 16 : 15));
+        $cutoffDay = $this->cutoffDay($wallet, $dueDay);
+        $cutoff = $month->day(min($cutoffDay, $month->endOfMonth()->day));
+        $billMonth = $occurred->lessThan($cutoff) ? $month : $month->addMonth();
 
-        if ($occurred->lessThan($thisBill)) {
-            return $thisBill->toDateString();
-        }
-
-        $next = $month->addMonth();
-
-        return $next->day(min($day, $next->endOfMonth()->day))->toDateString();
+        return $billMonth->day(min($dueDay, $billMonth->endOfMonth()->day))->toDateString();
     }
 
     /**
@@ -108,7 +114,7 @@ class Wallets
     }
 
     /**
-     * @param  array{name?: string, due_day?: int|null, plans?: list<array{id?: string, months: int, interest: float|int|string}>}  $data
+     * @param  array{name?: string, due_day?: int|null, cutoff_day?: int|null, plans?: list<array{id?: string, months: int, interest: float|int|string}>}  $data
      */
     public function update(string $id, array $data): void
     {
@@ -133,6 +139,10 @@ class Wallets
             if ($row['group'] === 'credit') {
                 if (array_key_exists('due_day', $data)) {
                     $rows[$index]['due_day'] = $this->dueDay($data['due_day'] ?? null);
+                }
+
+                if (array_key_exists('cutoff_day', $data)) {
+                    $rows[$index]['cutoff_day'] = $this->dueDay($data['cutoff_day'] ?? null);
                 }
 
                 if (array_key_exists('plans', $data) && is_array($data['plans'])) {
@@ -220,7 +230,7 @@ class Wallets
             }
 
             $firstDueOn = (string) ($data['first_due_on'] ?? $this->firstDueOn($row, now()->toDateString()));
-            $charge = $this->makeCharge((string) $data['description'], $months, $monthly, $firstDueOn);
+            $charge = $this->makeCharge((string) $data['description'], $months, $monthly, $firstDueOn, now()->toIso8601String());
             $rows[$index]['charges'][] = $charge;
             $this->save($rows);
 
@@ -420,6 +430,9 @@ class Wallets
 
         foreach ($this->stash() as $row) {
             foreach ($row['charges'] as $charge) {
+                $createdAt = (string) ($charge['created_at'] ?? '1970-01-01T00:00:00+00:00');
+                $statement = $this->isStatementCharge($row['slug'], $row['name'], (string) $charge['description']);
+
                 foreach ($charge['dues'] as $due) {
                     $dueOn = CarbonImmutable::parse($due['due_on'])->startOfDay();
                     $unpaid = ($due['paid_on'] ?? null) === null;
@@ -444,33 +457,40 @@ class Wallets
                         'paid_on' => $due['paid_on'],
                         'transaction_id' => $due['transaction_id'] ?? null,
                         'overdue' => $overdue,
+                        '_statement' => $statement,
+                        '_created_at' => $createdAt,
                     ];
                 }
             }
         }
 
-        $statementKeys = [];
+        $statementAt = [];
 
         foreach ($dues as $due) {
-            if (! $this->isStatementCharge($due['wallet_slug'], $due['wallet_name'], $due['description'])) {
+            if (! $due['_statement']) {
                 continue;
             }
 
-            $statementKeys[$due['wallet_id'].'|'.$due['due_on']] = true;
+            $key = $due['wallet_id'].'|'.$due['due_on'];
+            $created = $due['_created_at'];
+
+            if (! isset($statementAt[$key]) || $created > $statementAt[$key]) {
+                $statementAt[$key] = $created;
+            }
         }
 
-        $dues = array_values(array_filter($dues, function (array $due) use ($statementKeys): bool {
+        $dues = array_values(array_filter($dues, function (array $due) use ($statementAt): bool {
             $key = $due['wallet_id'].'|'.$due['due_on'];
 
-            if (! isset($statementKeys[$key])) {
+            if (! isset($statementAt[$key]) || $due['_statement']) {
                 return true;
             }
 
-            return $this->isStatementCharge($due['wallet_slug'], $due['wallet_name'], $due['description']);
+            return $due['_created_at'] > $statementAt[$key];
         }));
 
         foreach ($dues as $index => $due) {
-            unset($dues[$index]['wallet_slug']);
+            unset($dues[$index]['wallet_slug'], $dues[$index]['_statement'], $dues[$index]['_created_at']);
         }
 
         usort($dues, function (array $a, array $b): int {
@@ -559,6 +579,12 @@ class Wallets
 
             $plans = $group === 'credit' ? $this->normalizePlans($hadPlans ? $row['plans'] : []) : [];
             $charges = $group === 'credit' ? $this->normalizeCharges(is_array($row['charges'] ?? null) ? $row['charges'] : []) : [];
+            $dueDay = $group === 'credit' ? $this->dueDay($row['due_day'] ?? ($slug === 'lazpay' ? 16 : 15)) : null;
+            $hadCutoff = isset($row['cutoff_day']) && is_numeric($row['cutoff_day']) && (int) $row['cutoff_day'] > 0;
+
+            if ($group === 'credit' && ! $hadCutoff) {
+                $dirty = true;
+            }
 
             return [
                 'id' => (string) ($row['id'] ?? Str::uuid()),
@@ -566,7 +592,8 @@ class Wallets
                 'slug' => $slug !== '' ? $slug : 'wallet',
                 'group' => $group,
                 'locked' => $locked,
-                'due_day' => $group === 'credit' ? $this->dueDay($row['due_day'] ?? 15) : null,
+                'due_day' => $dueDay,
+                'cutoff_day' => $group === 'credit' ? $this->cutoffDay($row + ['slug' => $slug], (int) $dueDay) : null,
                 'plans' => $plans,
                 'charges' => $charges,
                 'deleted_at' => isset($row['deleted_at']) && is_string($row['deleted_at']) ? $row['deleted_at'] : null,
@@ -625,6 +652,7 @@ class Wallets
             'group' => $group,
             'locked' => $group === 'cash',
             'due_day' => $credit ? ($slug === 'lazpay' ? 16 : 15) : null,
+            'cutoff_day' => $credit ? $this->defaultCutoffDay($slug, $slug === 'lazpay' ? 16 : 15) : null,
             'plans' => $credit ? $this->defaultPlans() : [],
             'charges' => [],
             'deleted_at' => null,
@@ -644,6 +672,7 @@ class Wallets
             'group' => $row['group'],
             'locked' => (bool) $row['locked'],
             'due_day' => $row['due_day'],
+            'cutoff_day' => $row['cutoff_day'] ?? null,
             'plans' => $row['plans'],
             'charges' => $row['charges'],
         ];
@@ -709,6 +738,27 @@ class Wallets
     }
 
     /**
+     * @param  array<string, mixed>  $wallet
+     */
+    private function cutoffDay(array $wallet, int $dueDay): int
+    {
+        if (isset($wallet['cutoff_day']) && is_numeric($wallet['cutoff_day']) && (int) $wallet['cutoff_day'] > 0) {
+            return $this->dueDay($wallet['cutoff_day']);
+        }
+
+        return $this->defaultCutoffDay((string) ($wallet['slug'] ?? ''), $dueDay);
+    }
+
+    private function defaultCutoffDay(string $slug, int $dueDay): int
+    {
+        if ($slug === 'lazpay') {
+            return 1;
+        }
+
+        return max(1, $dueDay - 10);
+    }
+
+    /**
      * SPay / LazPay live under payment options. Their bill is the sum of
      * charges from bill Pay and daily-log purchases, not a Plan bill row.
      */
@@ -733,7 +783,8 @@ class Wallets
 
     /**
      * Spaylater / Lazpaylater (and names that start with the credit option) are the month statement.
-     * Other charges due that same day are already inside that total.
+     * Older charges due that same day are already inside that total. Purchases logged after the
+     * statement still belong on that bill.
      */
     private function isStatementCharge(string $slug, string $name, string $description): bool
     {
@@ -801,7 +852,7 @@ class Wallets
     {
         $normalized = [];
 
-        foreach ($charges as $charge) {
+        foreach ($charges as $index => $charge) {
             if (! is_array($charge)) {
                 continue;
             }
@@ -832,6 +883,9 @@ class Wallets
                 'monthly' => round((float) ($charge['monthly'] ?? ($dues[0]['amount'] ?? 0)), 2),
                 'interest' => round((float) ($charge['interest'] ?? 0), 2),
                 'first_due_on' => (string) ($charge['first_due_on'] ?? ($dues[0]['due_on'] ?? now()->toDateString())),
+                'created_at' => isset($charge['created_at']) && is_string($charge['created_at']) && $charge['created_at'] !== ''
+                    ? $charge['created_at']
+                    : CarbonImmutable::parse('1970-01-01T00:00:00+00:00')->addSeconds((int) $index)->toIso8601String(),
                 'dues' => $dues,
             ];
         }
@@ -842,7 +896,7 @@ class Wallets
     /**
      * @return array<string, mixed>
      */
-    private function makeCharge(string $description, int $months, float $monthly, string $firstDueOn): array
+    private function makeCharge(string $description, int $months, float $monthly, string $firstDueOn, ?string $createdAt = null): array
     {
         $monthly = round($monthly, 2);
         $first = CarbonImmutable::parse($firstDueOn)->startOfDay();
@@ -868,6 +922,7 @@ class Wallets
             'months' => $months,
             'interest' => 0.0,
             'first_due_on' => $first->toDateString(),
+            'created_at' => $createdAt ?? now()->toIso8601String(),
             'dues' => $dues,
         ];
     }

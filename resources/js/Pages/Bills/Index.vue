@@ -615,6 +615,7 @@ function prettyDate(iso: string) {
                     v-model:months="page.credit_months"
                     v-model:monthly="page.credit_monthly"
                     :credits="credits"
+                    :occurred-on="page.occurred_on"
                 />
                 <label v-if="paying.kind !== 'bill' || ! page.via_credit" class="grid gap-1">
                     <span class="kicker">Payment option</span>

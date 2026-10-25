@@ -170,6 +170,7 @@
 
     .sheet-head {
         display: flex;
+        flex-wrap: wrap;
         align-items: center;
         justify-content: space-between;
         gap: 0.75rem;
@@ -306,13 +307,23 @@
     }
 
     .modal {
-        width: min(32rem, calc(100vw - 1.5rem));
+        width: min(36rem, calc(100vw - 1.5rem));
         max-height: calc(100dvh - 2rem);
         overflow: auto;
         margin: auto;
         padding: 0;
         border: 0;
         background: transparent;
+    }
+
+    .modal-lg {
+        width: min(36rem, calc(100vw - 1.5rem));
+    }
+
+    @media (min-width: 768px) {
+        .modal-lg {
+            width: min(52rem, calc(100vw - 4rem));
+        }
     }
 
     .modal::backdrop,

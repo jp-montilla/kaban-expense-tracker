@@ -13,6 +13,30 @@ class DayLogRequest extends FormRequest
         return $this->user() !== null;
     }
 
+    protected function prepareForValidation(): void
+    {
+        $items = $this->input('items');
+
+        if (! is_array($items)) {
+            return;
+        }
+
+        foreach ($items as $index => $item) {
+            if (! is_array($item)) {
+                continue;
+            }
+
+            $viaCredit = filter_var($item['via_credit'] ?? false, FILTER_VALIDATE_BOOLEAN);
+            $items[$index]['via_credit'] = $viaCredit;
+
+            if ($viaCredit && (int) ($item['credit_months'] ?? 0) === 1 && ! is_numeric($item['credit_monthly'] ?? null)) {
+                $items[$index]['credit_monthly'] = $item['amount'] ?? null;
+            }
+        }
+
+        $this->merge(['items' => $items]);
+    }
+
     /**
      * @return array<string, mixed>
      */

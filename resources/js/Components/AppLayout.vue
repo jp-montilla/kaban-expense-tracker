@@ -82,7 +82,7 @@ function logout() {
             </div>
         </aside>
 
-        <div class="min-w-0 pb-[calc(5.75rem+env(safe-area-inset-bottom))] md:pb-0">
+        <div class="min-w-0 overflow-x-hidden pb-[calc(5.75rem+env(safe-area-inset-bottom))] md:pb-0">
             <main id="main">
                 <slot name="hero" />
                 <div class="mx-auto w-full max-w-5xl px-4 py-5 md:px-8 md:py-8" :class="$slots.hero ? '-mt-10 md:-mt-12' : ''">
@@ -157,7 +157,7 @@ function logout() {
             </div>
         </div>
 
-        <Modal v-if="loggingOpen" v-model="loggingOpen" title="Log">
+        <Modal v-if="loggingOpen" v-model="loggingOpen" title="Log" size="lg">
             <DayLogForm @saved="loggingOpen = false" />
         </Modal>
         <ConfirmDialog />

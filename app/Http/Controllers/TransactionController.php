@@ -234,7 +234,11 @@ class TransactionController extends Controller
         abort_unless($credit !== null && $credit['group'] === 'credit', 422, 'Unknown credit option.');
 
         $months = (int) $item['credit_months'];
-        $monthly = (float) $item['credit_monthly'];
+        $monthly = (float) ($item['credit_monthly'] ?? 0);
+
+        if ($months === 1 && $monthly < 0.01) {
+            $monthly = (float) $item['amount'];
+        }
         $charge = $wallets->addCharge($credit['id'], [
             'description' => $row->description,
             'months' => $months,

@@ -15,7 +15,11 @@ class PaymentMethodController extends Controller
         $data = $request->validated();
 
         try {
-            $wallets->add($data['name'], $data['group'] ?? 'wallet');
+            $row = $wallets->add($data['name'], $data['group'] ?? 'wallet');
+
+            if ($row['group'] === 'credit') {
+                $wallets->update($row['id'], $data);
+            }
         } catch (InvalidArgumentException $exception) {
             return back()->with('error', $exception->getMessage());
         }
