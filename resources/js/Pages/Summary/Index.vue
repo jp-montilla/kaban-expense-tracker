@@ -2,6 +2,10 @@
 import { Head, Link, router } from '@inertiajs/vue3'
 import { computed } from 'vue'
 import AppLayout from '../../Components/AppLayout.vue'
+import DashPanel from '../../Components/DashPanel.vue'
+import OverviewTiles from '../../Components/OverviewTiles.vue'
+import type { OverviewTile } from '../../Components/OverviewTiles.vue'
+import PageHeader from '../../Components/PageHeader.vue'
 import PageHero from '../../Components/PageHero.vue'
 import { pesos, tone } from '../../lib/money'
 
@@ -51,46 +55,40 @@ function sumHalves(month: MonthRow, key: 'bills' | 'loan' | 'daily') {
 }
 
 const activeMonths = computed(() => props.months.filter((row) => row.has_activity).length)
+
+const overview = computed<OverviewTile[]>(() => [
+    { label: 'Pay', value: pesos(props.income), icon: 'income', wrap: 'bg-[#E8F8EF] text-palm-deep' },
+    { label: 'Expenses', value: pesos(props.actual), icon: 'spend', wrap: 'bg-[#FDECEC] text-spend' },
+    { label: 'Left', value: pesos(props.cash_left), valueClass: tone(props.cash_left), icon: 'wallet', wrap: 'bg-[#EEEBFF] text-accent' },
+    { label: 'Months', value: String(activeMonths.value), icon: 'calendar', wrap: 'bg-[#E8F1FF] text-income' },
+])
 </script>
 
 <template>
     <Head :title="String(year)" />
     <AppLayout>
-        <template #hero>
-            <PageHero
-                :eyebrow="`Year · ${year}`"
-                label="Budget left"
-                :value="pesos(cash_left)"
-                :pill="`Expenses ${pesos(actual)}`"
-            />
-        </template>
-        <dl class="card stat-grid">
-            <div>
-                <dt>Pay</dt>
-                <dd class="num">{{ pesos(income) }}</dd>
-            </div>
-            <div>
-                <dt>Expenses</dt>
-                <dd class="num">{{ pesos(actual) }}</dd>
-            </div>
-            <div>
-                <dt>Left</dt>
-                <dd class="num" :class="tone(cash_left)">{{ pesos(cash_left) }}</dd>
-            </div>
-            <div>
-                <dt>Months</dt>
-                <dd class="num">{{ activeMonths }}</dd>
-            </div>
-        </dl>
-
-        <section class="card mt-4 overflow-x-auto">
-            <div class="sheet-head">
-                <h2>Months</h2>
+        <template #header>
+            <PageHeader :title="String(year)" subtitle="Pay, bills, living, and leftover by month.">
                 <label class="sr-only" for="summary-year">Year</label>
-                <select id="summary-year" class="field w-auto py-1 text-xs" :value="year" @change="onYear">
+                <select id="summary-year" class="rounded-full border border-line bg-paper px-3.5 py-2 text-sm font-medium shadow-sm" :value="year" @change="onYear">
                     <option v-for="option in years" :key="option" :value="option">{{ option }}</option>
                 </select>
+            </PageHeader>
+        </template>
+        <template #hero>
+            <PageHero
+                label="Budget left"
+                :value="pesos(cash_left)"
+                :hint="`Expenses ${pesos(actual)}`"
+            />
+        </template>
+        <DashPanel title="Overview" icon="chart" icon-wrap="bg-[#EEEBFF] text-accent">
+            <div class="px-5 pb-5">
+                <OverviewTiles :tiles="overview" />
             </div>
+        </DashPanel>
+
+        <DashPanel class="mt-4" title="Months" icon="calendar" icon-wrap="bg-[#E8F1FF] text-income">
             <table class="data-table min-w-[40rem]">
                 <caption class="sr-only">{{ year }} by month</caption>
                 <thead>
@@ -116,6 +114,6 @@ const activeMonths = computed(() => props.months.filter((row) => row.has_activit
                     </tr>
                 </tbody>
             </table>
-        </section>
+        </DashPanel>
     </AppLayout>
 </template>

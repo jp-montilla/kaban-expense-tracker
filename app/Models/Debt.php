@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Models\Concerns\BelongsToUser;
 use App\Models\Concerns\Trashable;
+use App\Support\CoverTag;
 use App\Support\Money;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
@@ -86,11 +87,12 @@ class Debt extends Model
         $payments = $this->relationLoaded('payments') ? $this->payments : $this->payments()->get();
 
         return round((float) $payments
-            ->filter(function (DebtPayment $payment) use ($start, $end): bool {
-                $on = $payment->occurred_on?->toImmutable()->startOfDay();
-
-                return $on !== null && $on->betweenIncluded($start->startOfDay(), $end->startOfDay());
-            })
+            ->filter(fn (DebtPayment $payment): bool => CoverTag::inWindow(
+                $payment->notes,
+                $payment->occurred_on?->toImmutable(),
+                $start,
+                $end,
+            ))
             ->sum(fn (DebtPayment $payment): float => (float) $payment->amount), 2);
     }
 

@@ -2,10 +2,12 @@
 import { Head, router } from '@inertiajs/vue3'
 import { computed, ref } from 'vue'
 import AppLayout from '../../Components/AppLayout.vue'
-import PageHero from '../../Components/PageHero.vue'
+import BusyOverlay from '../../Components/BusyOverlay.vue'
+import DashPanel from '../../Components/DashPanel.vue'
 import DayLogForm from '../../Components/DayLogForm.vue'
 import Modal from '../../Components/Modal.vue'
-import BusyOverlay from '../../Components/BusyOverlay.vue'
+import PageHeader from '../../Components/PageHeader.vue'
+import PageHero from '../../Components/PageHero.vue'
 import PeriodPicker from '../../Components/PeriodPicker.vue'
 import type { PeriodValue } from '../../Components/PeriodPicker.vue'
 import TransactionForm from '../../Components/TransactionForm.vue'
@@ -167,27 +169,27 @@ function amountLabel(row: Row): string {
 <template>
     <Head :title="title" />
     <AppLayout>
+        <template #header>
+            <PageHeader :title="title" :subtitle="period.label">
+                <PeriodPicker :period="period" :base="base" :month-only="mode === 'daily'" tone="toolbar" />
+            </PageHeader>
+        </template>
         <template #hero>
             <PageHero
-                :eyebrow="`${title} · ${period.label}`"
                 :label="mode === 'bills' ? 'Bills and loans' : 'Spent'"
                 :value="pesos(mode === 'bills' ? totals.bills + totals.loan : totals.daily)"
-                :pill="`${transactions.length} ${transactions.length === 1 ? 'line' : 'lines'}`"
+                :hint="`${transactions.length} ${transactions.length === 1 ? 'line' : 'lines'}`"
             />
         </template>
         <BusyOverlay :show="busy" label="Updating…" />
 
-        <section class="card min-w-0 overflow-hidden">
-            <div class="sheet-head flex-wrap">
-                <h2>{{ title }}</h2>
-                <div class="flex min-w-0 flex-wrap items-center justify-end gap-2">
-                    <PeriodPicker :period="period" :base="base" :month-only="mode === 'daily'" />
-                    <button type="button" class="btn-ghost py-1 text-xs" @click="editingDay = null; adding = true">Add</button>
-                </div>
-            </div>
-            <p v-if="transactions.length === 0" class="px-3 py-3 text-sm text-moss">Nothing in {{ period.label }} yet.</p>
+        <DashPanel :title="title" :icon="mode === 'daily' ? 'log' : 'bills'" :icon-wrap="mode === 'daily' ? 'bg-[#E8F1FF] text-income' : 'bg-[#EEEBFF] text-accent'">
+            <template #actions>
+                <button type="button" class="btn-ghost py-1 text-xs" @click="editingDay = null; adding = true">Add</button>
+            </template>
+            <p v-if="transactions.length === 0" class="px-5 py-3 text-sm text-moss">Nothing in {{ period.label }} yet.</p>
             <ul v-else-if="mode === 'daily'" class="divide-y divide-line">
-                <li v-for="day in days" :key="day.date" class="px-3 py-2.5">
+                <li v-for="day in days" :key="day.date" class="px-5 py-2.5">
                     <div class="flex items-baseline justify-between gap-3">
                         <p class="min-w-0 text-sm text-moss">{{ prettyDate(day.date) }}</p>
                         <p class="num shrink-0 text-sm" :class="day.total < 0 ? 'text-palm-deep' : ''">{{ pesos(day.total) }}</p>
@@ -245,7 +247,7 @@ function amountLabel(row: Row): string {
                     </tr>
                 </tbody>
             </table>
-        </section>
+        </DashPanel>
 
         <Modal v-if="adding" v-model="adding" :title="mode === 'bills' ? 'Add' : 'Log'" size="lg">
             <DayLogForm v-if="mode === 'daily'" @saved="adding = false" />

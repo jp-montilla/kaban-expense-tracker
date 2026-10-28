@@ -9,6 +9,9 @@ use App\Models\DebtPayment;
 use App\Models\Transaction;
 use App\Services\DueWhen;
 use App\Services\Wallets;
+use App\Support\CoverTag;
+use App\Support\PayTag;
+use Carbon\CarbonImmutable;
 use Illuminate\Http\RedirectResponse;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -24,18 +27,31 @@ class DebtController extends Controller
             ->get()
             ->map(function (Debt $debt) use ($dueWhen): array {
                 $due = $dueWhen->decorate('loans', $debt->id);
+                $lastCover = $debt->payments
+                    ->map(fn (DebtPayment $payment): ?CarbonImmutable => CoverTag::on(
+                        $payment->notes,
+                        $payment->occurred_on?->toImmutable(),
+                    ))
+                    ->filter()
+                    ->sortBy(fn (CarbonImmutable $date): string => $date->toDateString())
+                    ->last();
+                $next = $lastCover === null
+                    ? CarbonImmutable::today()->startOfMonth()
+                    : $lastCover->startOfMonth()->addMonth();
 
                 return [
                     ...$debt->toSummaryArray(),
                     'due_mode' => $due['mode'],
                     'due_day' => $due['day'],
                     'due_label' => $due['label'],
+                    'covers_on' => $dueWhen->dateIn($next->year, $next->month, $due),
                     'payments' => $debt->payments->map(fn (DebtPayment $payment): array => [
                         'id' => $payment->id,
                         'occurred_on' => $payment->occurred_on->toDateString(),
+                        'covers_on' => CoverTag::on($payment->notes, $payment->occurred_on)?->toDateString(),
                         'amount' => (float) $payment->amount,
                         'installment_no' => $payment->installment_no,
-                        'notes' => $payment->notes,
+                        'notes' => CoverTag::strip(PayTag::strip($payment->notes)),
                         'counts_in_spending' => $payment->transaction_id !== null,
                     ])->values(),
                 ];

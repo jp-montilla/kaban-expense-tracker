@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { computed, nextTick, onUnmounted, ref, useTemplateRef, watch } from 'vue'
+import Icon from './Icon.vue'
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'] as const
 
 const props = withDefaults(defineProps<{
     year: number
     month: number
-    tone?: 'page' | 'hero'
+    tone?: 'page' | 'hero' | 'toolbar'
     id?: string
 }>(), {
     tone: 'page',
@@ -32,9 +33,17 @@ const now = new Date()
 const thisYear = now.getFullYear()
 const thisMonth = now.getMonth() + 1
 
-const triggerClass = computed(() => props.tone === 'hero'
-    ? 'inline-flex min-w-[10.5rem] items-center justify-between gap-2 rounded-full border-0 bg-white/15 px-3 py-1.5 text-sm font-medium text-white'
-    : 'field !w-auto inline-flex min-w-[10.5rem] items-center justify-between gap-2 py-1.5 text-sm')
+const triggerClass = computed(() => {
+    if (props.tone === 'hero') {
+        return 'inline-flex min-w-[10.5rem] items-center justify-between gap-2 rounded-full border-0 bg-white/15 px-3 py-1.5 text-sm font-medium text-white'
+    }
+
+    if (props.tone === 'toolbar') {
+        return 'inline-flex min-w-[11rem] items-center justify-between gap-2 rounded-full border border-line bg-paper px-3.5 py-2 text-sm font-medium text-ink shadow-sm'
+    }
+
+    return 'field !w-auto inline-flex min-w-[10.5rem] items-center justify-between gap-2 py-1.5 text-sm'
+})
 
 watch(() => [props.year, props.month], () => {
     if (! open.value) {
@@ -148,7 +157,10 @@ function isCurrent(month: number) {
             aria-haspopup="dialog"
             @click="toggle"
         >
-            <span>{{ label }}</span>
+            <span class="flex items-center gap-2">
+                <Icon v-if="tone === 'toolbar'" name="calendar" :size="16" class="text-moss" />
+                {{ label }}
+            </span>
             <svg class="size-3.5 shrink-0 opacity-60" viewBox="0 0 12 12" aria-hidden="true">
                 <path d="M2.4 4.2 6 7.8l3.6-3.6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
             </svg>

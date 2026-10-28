@@ -10,6 +10,7 @@ use App\Services\DueWhen;
 use App\Services\Ledger;
 use App\Services\MonthSheet;
 use App\Services\Wallets;
+use App\Support\CoverTag;
 use App\Support\CreditTag;
 use App\Support\DueTag;
 use App\Support\Money;
@@ -33,6 +34,18 @@ class TransactionController extends Controller
         $period = Period::fromRequest($request);
         $types = ['bill', 'debt_payment'];
         $transactions = $ledger->listing($period->year, $period->month, $types, $period);
+        $covering = Transaction::query()
+            ->with('category')
+            ->whereIn('type', $types)
+            ->orderByDesc('occurred_on')
+            ->orderByDesc('id')
+            ->get()
+            ->filter(fn (Transaction $row): bool => CoverTag::inWindow(
+                $row->notes,
+                $row->occurred_on?->toImmutable(),
+                $period->start,
+                $period->end,
+            ));
         $totals = $ledger->totals($transactions);
         $bills = Category::query()
             ->where('kind', 'bill')
@@ -42,13 +55,12 @@ class TransactionController extends Controller
             ->get()
             ->reject(fn (Category $bill): bool => $wallets->isCreditAccount($bill->slug, $bill->name))
             ->filter(fn (Category $bill): bool => $dueWhen->matchesHalf($dueWhen->for('bills', $bill->id), $period->half))
-            ->map(function (Category $bill) use ($transactions, $dueWhen): array {
-                $payments = $transactions
+            ->map(function (Category $bill) use ($covering, $dueWhen, $period): array {
+                $payments = $covering
                     ->filter(fn (Transaction $row): bool => $row->category_id === $bill->id && $row->type === 'bill');
                 $spent = $payments->sum(fn (Transaction $row): float => $row->direction === 'in' ? -(float) $row->amount : (float) $row->amount);
                 $latest = $payments->first();
                 $item = $latest?->toListItem();
-
                 $due = $dueWhen->decorate('bills', $bill->id);
 
                 return [
@@ -62,9 +74,11 @@ class TransactionController extends Controller
                     'due_mode' => $due['mode'],
                     'due_day' => $due['day'],
                     'due_label' => $due['label'],
+                    'covers_on' => $dueWhen->dateIn($period->year, $period->month, $due),
                     'payment' => $item === null ? null : [
                         'id' => $item['id'],
                         'occurred_on' => $item['occurred_on'],
+                        'covers_on' => $item['covers_on'] ?? null,
                         'amount' => $item['amount'],
                         'payment_method' => $item['payment_method'],
                         'notes' => $item['notes'],
@@ -77,14 +91,26 @@ class TransactionController extends Controller
             ->values();
         $creditDues = $sheet->creditDues($period);
         $planned = $sheet->plannedStats($period);
+        $seen = [];
         $rows = $transactions
+            ->concat($covering)
             ->reject(fn (Transaction $transaction): bool => CreditTag::chargeId($transaction->notes) !== null
                 && DueTag::id($transaction->notes) === null)
+            ->filter(function (Transaction $transaction) use (&$seen): bool {
+                if (isset($seen[$transaction->id])) {
+                    return false;
+                }
+
+                $seen[$transaction->id] = true;
+
+                return true;
+            })
+            ->sortByDesc(fn (Transaction $transaction): string => $transaction->occurred_on->toDateString().'-'.$transaction->id)
+            ->values()
             ->map(fn (Transaction $transaction): array => [
                 ...$transaction->toListItem(),
                 'source' => 'transaction',
-            ])
-            ->values();
+            ]);
 
         return Inertia::render('Bills/Index', [
             'period' => $period->toArray(),
@@ -98,6 +124,7 @@ class TransactionController extends Controller
                 ))
                 ->values(),
             'credit_dues' => $creditDues,
+            'advance_dues' => $sheet->advanceDues($period),
             'wallets' => $wallets->all(),
             'pay_sources' => $wallets->paySources(),
             'payments' => $rows,

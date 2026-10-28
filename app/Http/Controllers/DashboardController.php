@@ -24,6 +24,7 @@ class DashboardController extends Controller
         );
         $tiles = $sheet->payTiles($funding, $period->half);
         $overview['figures']['view_bills'] = $tiles['bills'];
+        $overview['figures']['view_credit'] = $tiles['credit'];
         $overview['figures']['view_loan'] = $tiles['loan'];
         $overview['figures']['saved'] = $tiles['saved'];
         $overview['figures']['approx_savings'] = $tiles['leftover'];
@@ -31,6 +32,7 @@ class DashboardController extends Controller
         return Inertia::render('Dashboard', [
             ...$overview,
             'funding' => $funding,
+            'cash_bills' => $sheet->cashDueRows($period),
             'dues' => $dues,
             'debts' => $sheet->loans($period),
             'logCategories' => Category::query()

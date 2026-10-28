@@ -2,8 +2,12 @@
 import { Head, Link, router, useForm, usePage } from '@inertiajs/vue3'
 import { computed, ref, watch } from 'vue'
 import AppLayout from '../../Components/AppLayout.vue'
-import PageHero from '../../Components/PageHero.vue'
 import BusyOverlay from '../../Components/BusyOverlay.vue'
+import DashPanel from '../../Components/DashPanel.vue'
+import OverviewTiles from '../../Components/OverviewTiles.vue'
+import type { OverviewTile } from '../../Components/OverviewTiles.vue'
+import PageHeader from '../../Components/PageHeader.vue'
+import PageHero from '../../Components/PageHero.vue'
 import Modal from '../../Components/Modal.vue'
 import { confirmDelete } from '../../lib/confirm'
 import { pesos } from '../../lib/money'
@@ -73,6 +77,7 @@ const props = defineProps<{
     living_from: string
     funding: {
         living: number
+        credit: number
         first: { pay: number, bills: Array<{ name: string, amount: number }>, bills_total: number, saved: number, leftover: number }
         second: { pay: number, bills: Array<{ name: string, amount: number }>, bills_total: number, loans: number, saved: number, leftover: number }
         saved: number
@@ -157,6 +162,20 @@ const payNote = computed(() => {
 
     return `${props.previous_pay_label} pay ${pesos(props.first_cutoff)} plus ${props.current_pay_label} pay ${pesos(props.second_cutoff)} is the ${props.budget_month} budget.`
 })
+
+const overview = computed<OverviewTile[]>(() => [
+    { label: 'Bills', value: pesos(props.bill_plan), icon: 'bills', wrap: 'bg-[#EEEBFF] text-accent' },
+    { label: 'Loans', value: pesos(props.loan_plan), icon: 'lock', wrap: 'bg-[#E8F1FF] text-income' },
+    { label: 'Living', value: pesos(props.living_plan), icon: 'house', wrap: 'bg-[#FFF4E5] text-gold' },
+    {
+        label: 'Saved',
+        value: pesos(props.funding.saved),
+        hint: `left ${pesos(props.funding.approx_savings)}`,
+        valueClass: props.funding.saved < 0 ? 'text-clay' : 'text-palm-deep',
+        icon: 'savings',
+        wrap: 'bg-[#E8F8EF] text-palm-deep',
+    },
+])
 
 const payOpen = computed({
     get: () => showPay.value,
@@ -466,64 +485,50 @@ function savePassword() {
 <template>
     <Head title="Plan" />
     <AppLayout>
+        <template #header>
+            <PageHeader title="Plan" :subtitle="`${budget_month} · month budget ${pesos(month_pay)}`" />
+        </template>
         <template #hero>
             <PageHero
-                :eyebrow="`Plan · ${budget_month}`"
                 label="Left"
                 :value="pesos(funding.approx_savings)"
-                :pill="`Month budget ${pesos(month_pay)}`"
+                :hint="`Month budget ${pesos(month_pay)}`"
             >
-                <div v-if="pay_mode !== 'month'" class="hero-split">
-                    <div>
-                        <p class="text-xs text-white/70">{{ previous_pay_label }}</p>
-                        <p class="num mt-1 text-lg text-white">{{ pesos(first_cutoff) }}</p>
-                        <p v-if="funding.first.saved" class="mt-1 text-xs text-white/70">saved {{ pesos(funding.first.saved) }}</p>
-                        <p class="mt-1 text-xs text-white/70">left {{ pesos(funding.first.leftover) }}</p>
+                <template v-if="pay_mode !== 'month'" #side>
+                    <div class="grid grid-cols-2 gap-3">
+                        <div class="rounded-2xl bg-white/15 px-4 py-3 backdrop-blur-sm">
+                            <p class="text-xs text-white/75">{{ previous_pay_label }}</p>
+                            <p class="num mt-2 text-lg text-white">{{ pesos(first_cutoff) }}</p>
+                            <p v-if="funding.first.saved" class="mt-1 text-xs text-white/75">saved {{ pesos(funding.first.saved) }}</p>
+                            <p class="mt-0.5 text-xs text-white/75">left {{ pesos(funding.first.leftover) }}</p>
+                        </div>
+                        <div class="rounded-2xl bg-white/15 px-4 py-3 backdrop-blur-sm">
+                            <p class="text-xs text-white/75">{{ current_pay_label }}</p>
+                            <p class="num mt-2 text-lg text-white">{{ pesos(second_cutoff) }}</p>
+                            <p v-if="funding.second.saved" class="mt-1 text-xs text-white/75">saved {{ pesos(funding.second.saved) }}</p>
+                            <p class="mt-0.5 text-xs text-white/75">left {{ pesos(funding.second.leftover) }}</p>
+                        </div>
                     </div>
-                    <p class="self-center text-white/40">+</p>
-                    <div>
-                        <p class="text-xs text-white/70">{{ current_pay_label }}</p>
-                        <p class="num mt-1 text-lg text-white">{{ pesos(second_cutoff) }}</p>
-                        <p v-if="funding.second.saved" class="mt-1 text-xs text-white/70">saved {{ pesos(funding.second.saved) }}</p>
-                        <p class="mt-1 text-xs text-white/70">left {{ pesos(funding.second.leftover) }}</p>
-                    </div>
-                </div>
-                <p class="mx-auto mt-4 w-fit text-sm text-white/90">
+                </template>
+                <p>
                     Saved {{ pesos(funding.saved) }}
                     <span class="text-white/70"> · left {{ pesos(funding.approx_savings) }}</span>
                 </p>
-                <p v-if="pay_mode === 'month'" class="mx-auto mt-2 max-w-md text-center text-sm text-white/90">{{ payNote }}</p>
+                <p v-if="pay_mode === 'month'" class="mt-2 text-white/80">{{ payNote }}</p>
             </PageHero>
         </template>
 
         <BusyOverlay :show="busy" label="Updating…" />
 
-        <dl class="card stat-grid">
-            <div>
-                <dt>Bills</dt>
-                <dd class="num">{{ pesos(bill_plan) }}</dd>
+        <DashPanel title="Overview" icon="chart" icon-wrap="bg-[#EEEBFF] text-accent">
+            <div class="px-5 pb-5">
+                <OverviewTiles :tiles="overview" />
             </div>
-            <div>
-                <dt>Loans</dt>
-                <dd class="num">{{ pesos(loan_plan) }}</dd>
-            </div>
-            <div>
-                <dt>Living</dt>
-                <dd class="num">{{ pesos(living_plan) }}</dd>
-            </div>
-            <div>
-                <dt>Saved</dt>
-                <dd class="num" :class="funding.saved < 0 ? 'text-clay' : 'text-palm-deep'">{{ pesos(funding.saved) }}</dd>
-                <p class="mt-1 text-xs text-moss">left {{ pesos(funding.approx_savings) }}</p>
-            </div>
-        </dl>
+        </DashPanel>
 
-        <section class="card mt-4 overflow-hidden">
-            <div class="sheet-head">
-                <h2>From each paycheck</h2>
-            </div>
-            <div class="grid gap-px bg-line sm:grid-cols-2">
-                <div class="bg-paper px-3 py-3">
+        <DashPanel class="mt-4" title="From each paycheck" icon="income" icon-wrap="bg-[#E8F8EF] text-palm-deep">
+            <div class="grid gap-4 px-5 pb-5 sm:grid-cols-2">
+                <div class="rounded-2xl bg-mist/70 p-4">
                     <p class="kicker">{{ previous_pay_label }}</p>
                     <p class="num mt-1 text-lg">{{ pesos(first_cutoff) }}</p>
                     <p class="mt-2 text-sm text-moss">Living {{ pesos(funding.living) }}</p>
@@ -535,7 +540,7 @@ function savePassword() {
                         Left {{ pesos(funding.first.leftover) }}
                     </p>
                 </div>
-                <div class="bg-paper px-3 py-3">
+                <div class="rounded-2xl bg-mist/70 p-4">
                     <p class="kicker">{{ current_pay_label }}</p>
                     <p class="num mt-1 text-lg">{{ pesos(second_cutoff) }}</p>
                     <p v-for="bill in funding.second.bills" :key="'second-'+bill.name" class="mt-2 text-sm text-moss first:mt-2">
@@ -549,16 +554,15 @@ function savePassword() {
                     </p>
                 </div>
             </div>
-        </section>
+        </DashPanel>
 
-        <section class="card mt-4 overflow-x-auto">
-            <div class="sheet-head">
-                <h2>Pay per cutoff</h2>
+        <DashPanel class="mt-4" title="Pay per cutoff" icon="income" icon-wrap="bg-[#E8F8EF] text-palm-deep">
+            <template #actions>
                 <div class="flex gap-2">
                     <button type="button" class="btn-ghost py-1 text-xs" @click="openAddPay">Add pay</button>
                     <button type="button" class="btn-ghost py-1 text-xs" @click="openAddBonus">Add bonus</button>
                 </div>
-            </div>
+            </template>
             <table class="data-table">
                 <caption class="sr-only">Pay per cutoff</caption>
                 <thead class="border-y border-line text-moss">
@@ -613,13 +617,12 @@ function savePassword() {
                     </tbody>
                 </table>
             </div>
-        </section>
+        </DashPanel>
 
-        <section class="card mt-4 min-w-0 overflow-x-auto">
-            <div class="sheet-head">
-                <h2>Bills</h2>
+        <DashPanel class="mt-4" title="Bills" icon="bills">
+            <template #actions>
                 <button type="button" class="btn-ghost py-1 text-xs" @click="openAddBill">Add bill</button>
-            </div>
+            </template>
             <table class="data-table">
                 <caption class="sr-only">Bills</caption>
                 <thead class="border-y border-line text-moss">
@@ -655,12 +658,9 @@ function savePassword() {
                     </tr>
                 </tbody>
             </table>
-        </section>
+        </DashPanel>
 
-        <section class="card mt-4 overflow-hidden">
-            <div class="sheet-head">
-                <h2>Payment options</h2>
-            </div>
+        <DashPanel class="mt-4" title="Payment options" icon="wallet" icon-wrap="bg-[#FFF1E8] text-[#E67E22]">
             <div v-for="group in optionGroups" :key="group.key" class="border-t border-line">
                 <div class="flex items-center justify-between gap-3 bg-mist/50 px-3 py-2">
                     <h3 class="text-xs font-semibold uppercase tracking-wide text-moss">{{ group.label }}</h3>
@@ -685,9 +685,9 @@ function savePassword() {
                     <li v-if="group.items.length === 0" class="px-3 py-2 text-sm text-moss">None yet.</li>
                 </ul>
             </div>
-        </section>
+        </DashPanel>
 
-        <form class="card mt-4 flex flex-wrap items-end gap-3 px-3 py-3" @submit.prevent="saveLiving">
+        <form class="card mt-4 flex flex-wrap items-end gap-3 px-5 py-4" @submit.prevent="saveLiving">
             <label class="grid min-w-40 flex-1 gap-1">
                 <span class="kicker">Living budget</span>
                 <input v-model="livingForm.living_plan" type="number" min="0" step="0.01" required class="field py-1.5">
@@ -703,11 +703,10 @@ function savePassword() {
             <button class="btn py-1.5" :disabled="livingForm.processing">Save</button>
         </form>
 
-        <section class="card mt-4 overflow-x-auto">
-            <div class="sheet-head">
-                <h2>Loans</h2>
-                <Link href="/loans" class="text-sm text-moss hover:text-ink">Open</Link>
-            </div>
+        <DashPanel class="mt-4" title="Loans" icon="lock" icon-wrap="bg-[#E8F1FF] text-income">
+            <template #actions>
+                <Link href="/loans" class="btn-ghost py-1 text-xs">Open</Link>
+            </template>
             <table class="data-table">
                 <caption class="sr-only">Loans</caption>
                 <thead class="border-y border-line text-moss">
@@ -738,7 +737,7 @@ function savePassword() {
                     </tr>
                 </tbody>
             </table>
-        </section>
+        </DashPanel>
 
         <p class="mt-4">
             <button type="button" class="text-sm text-moss hover:text-ink" @click="showPassword = true">Change password</button>

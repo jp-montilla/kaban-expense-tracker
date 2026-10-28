@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Link, router, usePage } from '@inertiajs/vue3'
-import { computed, ref } from 'vue'
+import { computed, nextTick, shallowRef, watch } from 'vue'
 import { loggingOpen } from '../lib/logModal'
 import ConfirmDialog from './ConfirmDialog.vue'
 import DayLogForm from './DayLogForm.vue'
@@ -14,7 +14,7 @@ const page = usePage<{
 const user = computed(() => page.props.auth?.user ?? null)
 const path = computed(() => (page.url.split('?')[0] || '/'))
 
-const moreOpen = ref(false)
+const moreOpen = shallowRef(false)
 
 const primary = [
     { href: '/', label: 'Dashboard', icon: 'home' as const, match: (url: string) => url === '/' },
@@ -41,6 +41,25 @@ const extra = computed(() => {
 const rail = computed(() => [...primary, ...extra.value])
 const moreOn = computed(() => extra.value.some((link) => link.match(path.value)))
 
+const initials = computed(() => {
+    const parts = (user.value?.name ?? '').trim().split(/\s+/).filter(Boolean)
+
+    if (parts.length === 0) {
+        return '?'
+    }
+
+    if (parts.length === 1) {
+        return parts[0].slice(0, 2).toUpperCase()
+    }
+
+    return `${parts[0][0]}${parts[parts.length - 1][0]}`.toUpperCase()
+})
+
+watch(path, async () => {
+    await nextTick()
+    document.querySelector('aside a[aria-current="page"]')?.scrollIntoView({ block: 'nearest' })
+}, { immediate: true })
+
 function openLogModal() {
     loggingOpen.value = true
 }
@@ -52,40 +71,60 @@ function logout() {
 </script>
 
 <template>
-    <div class="min-h-screen md:grid md:grid-cols-[232px_1fr]">
+    <div class="min-h-svh bg-cream">
         <a href="#main" class="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded-xl focus:bg-paper focus:px-3 focus:py-2">
             Skip to content
         </a>
 
-        <aside class="hidden border-r border-line bg-paper md:sticky md:top-0 md:flex md:h-svh md:flex-col md:self-start md:overflow-hidden md:px-4 md:py-6">
-            <p class="shrink-0 px-2 text-lg font-semibold tracking-tight">Kaban</p>
+        <aside class="fixed inset-y-0 left-0 z-30 hidden h-svh w-60 flex-col bg-paper px-4 py-6 md:flex">
+            <Link href="/" class="flex shrink-0 items-center gap-2.5 px-2">
+                <span class="grid size-9 place-items-center rounded-xl bg-accent text-white">
+                    <Icon name="chart" :size="18" />
+                </span>
+                <span class="text-lg font-semibold tracking-tight">Kaban</span>
+            </Link>
+
             <nav class="mt-7 min-h-0 flex-1 overflow-y-auto [scrollbar-width:thin]" aria-label="Sections">
                 <Link
                     v-for="link in rail"
                     :key="link.href"
                     :href="link.href"
-                    class="flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors duration-150"
+                    class="flex items-center gap-2.5 rounded-2xl px-3 py-2.5 text-sm font-medium transition-colors duration-150"
+                    :aria-current="link.match(path) ? 'page' : undefined"
                     :class="link.match(path) ? 'bg-accent/10 text-accent' : 'text-moss hover:bg-mist hover:text-ink'"
                 >
                     <Icon :name="link.icon" :size="18" />
                     {{ link.label }}
                 </Link>
             </nav>
-            <button type="button" class="btn mt-4 w-full shrink-0" @click="openLogModal">
+
+            <button type="button" class="btn mt-4 w-full shrink-0 rounded-2xl" @click="openLogModal">
                 <Icon name="plus" :size="16" />
                 Log
             </button>
-            <div v-if="user" class="mt-4 shrink-0 border-t border-line px-2 pt-4 text-sm">
-                <p class="truncate font-medium text-ink">{{ user.name }}</p>
-                <p class="truncate text-moss">{{ user.email }}</p>
-                <button type="button" class="mt-3 text-moss hover:text-ink" @click="logout">Log out</button>
+
+            <div v-if="user" class="mt-4 shrink-0 rounded-2xl bg-mist/80 p-3">
+                <div class="flex items-center gap-3">
+                    <span class="grid size-10 shrink-0 place-items-center rounded-full bg-accent text-xs font-semibold text-white">
+                        {{ initials }}
+                    </span>
+                    <div class="min-w-0">
+                        <p class="truncate text-sm font-semibold text-ink">{{ user.name }}</p>
+                        <p class="truncate text-xs text-moss">{{ user.email }}</p>
+                    </div>
+                </div>
+                <button type="button" class="mt-3 flex items-center gap-2 px-1 text-sm text-moss hover:text-ink" @click="logout">
+                    <Icon name="out" :size="16" />
+                    Log out
+                </button>
             </div>
         </aside>
 
-        <div class="min-w-0 overflow-x-hidden pb-[calc(5.75rem+env(safe-area-inset-bottom))] md:pb-0">
-            <main id="main">
+        <div class="min-w-0 overflow-x-clip pb-[calc(5.75rem+env(safe-area-inset-bottom))] md:pb-0 md:pl-60">
+            <main id="main" class="mx-auto w-full max-w-[1120px] px-4 py-5 md:px-8 md:py-8">
+                <slot name="header" />
                 <slot name="hero" />
-                <div class="mx-auto w-full max-w-5xl px-4 py-5 md:px-8 md:py-8" :class="$slots.hero ? '-mt-10 md:-mt-12' : ''">
+                <div :class="($slots.header || $slots.hero) ? 'mt-4' : ''">
                     <slot />
                 </div>
             </main>

@@ -2,6 +2,8 @@
 import { Head, router, useForm } from '@inertiajs/vue3'
 import { computed, ref } from 'vue'
 import AppLayout from '../../Components/AppLayout.vue'
+import DashPanel from '../../Components/DashPanel.vue'
+import PageHeader from '../../Components/PageHeader.vue'
 import PageHero from '../../Components/PageHero.vue'
 import Modal from '../../Components/Modal.vue'
 import { confirmDelete } from '../../lib/confirm'
@@ -95,20 +97,21 @@ function removePerson(person: Person) {
 <template>
     <Head title="Users" />
     <AppLayout>
+        <template #header>
+            <PageHeader title="Users" subtitle="People who can open this household." />
+        </template>
         <template #hero>
             <PageHero
-                eyebrow="Users"
                 label="Accounts"
                 :value="String(people.length)"
-                :pill="`${people.filter((row) => row.is_active).length} on`"
+                :hint="`${people.filter((row) => row.is_active).length} on`"
             />
         </template>
 
-        <section class="card overflow-x-auto">
-            <div class="sheet-head">
-                <h2>Household</h2>
+        <DashPanel title="Household" icon="people" icon-wrap="bg-[#EEEBFF] text-accent">
+            <template #actions>
                 <button type="button" class="btn-ghost py-1 text-xs" @click="adding = true">Add</button>
-            </div>
+            </template>
             <table class="data-table min-w-[36rem]">
                 <caption class="sr-only">Accounts</caption>
                 <thead>
@@ -133,7 +136,7 @@ function removePerson(person: Person) {
                     </tr>
                 </tbody>
             </table>
-        </section>
+        </DashPanel>
 
         <Modal v-if="adding" v-model="adding" title="Add user">
             <form class="grid gap-3" @submit.prevent="addPerson">

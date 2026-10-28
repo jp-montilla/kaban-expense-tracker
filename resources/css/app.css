@@ -135,8 +135,8 @@
 
     .card {
         background: var(--color-paper);
-        border-radius: 1rem;
-        box-shadow: 0 8px 20px rgb(70 60 180 / 0.08);
+        border-radius: 1.25rem;
+        box-shadow: 0 12px 32px rgb(91 76 232 / 0.07);
     }
 
     .kicker {
@@ -174,7 +174,7 @@
         align-items: center;
         justify-content: space-between;
         gap: 0.75rem;
-        padding: 0.625rem 0.75rem;
+        padding: 1rem 1.25rem 0.75rem;
     }
 
     .sheet-head h2,
@@ -230,7 +230,7 @@
 
     .data-table th,
     .data-table td {
-        padding: 0.375rem 0.75rem;
+        padding: 0.7rem 1.25rem;
     }
 
     .data-table th {
@@ -280,7 +280,7 @@
     }
 
     .hero {
-        background: linear-gradient(165deg, #5346e0 0%, #6d5ef6 48%, #8a7bff 100%);
+        background: linear-gradient(118deg, #4f46e5 0%, #6366f1 42%, #818cf8 100%);
         color: #ffffff;
     }
 

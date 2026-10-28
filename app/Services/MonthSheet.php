@@ -7,6 +7,8 @@ use App\Models\Debt;
 use App\Models\DebtPayment;
 use App\Models\SavingsEntry;
 use App\Models\Transaction;
+use App\Support\CoverTag;
+use App\Support\DueTag;
 use App\Support\Money;
 use App\Support\Period;
 use Carbon\CarbonImmutable;
@@ -26,11 +28,54 @@ class MonthSheet
      */
     public function creditDues(Period $period): Collection
     {
+        $future = $this->isFuture($period);
+
         return collect($this->wallets->duesForPeriod($period->start, $period->end))
-            ->filter(fn (array $due): bool => $this->dueWhen->matchesDate($due['due_on'] ?? null, $period->half))
+            ->filter(function (array $due) use ($period, $future): bool {
+                if (! $this->dueWhen->matchesDate($due['due_on'] ?? null, $period->half)) {
+                    return false;
+                }
+
+                return ! $future || ! ($due['overdue'] ?? false);
+            })
             ->map(fn (array $due): array => [
                 ...$due,
                 'payable' => $due['paid_on'] === null,
+            ])
+            ->values();
+    }
+
+    /**
+     * Unpaid credit installments due in the next calendar month.
+     * Only listed on the month you are in, so a future month does not mix in later dues.
+     *
+     * @return Collection<int, array<string, mixed>>
+     */
+    public function advanceDues(Period $period): Collection
+    {
+        if (! $this->isCurrent($period)) {
+            return collect();
+        }
+
+        $after = $period->end->startOfDay()->addDay();
+        $until = $period->end->startOfMonth()->addMonth()->endOfMonth();
+
+        if ($until->lt($after)) {
+            return collect();
+        }
+
+        return collect($this->wallets->duesForPeriod($after, $until))
+            ->filter(function (array $due) use ($after): bool {
+                if (($due['paid_on'] ?? null) !== null) {
+                    return false;
+                }
+
+                return CarbonImmutable::parse($due['due_on'])->startOfDay()->gte($after);
+            })
+            ->map(fn (array $due): array => [
+                ...$due,
+                'payable' => true,
+                'advance' => true,
             ])
             ->values();
     }
@@ -55,10 +100,14 @@ class MonthSheet
             : Transaction::query()
                 ->whereIn('category_id', $categories->pluck('id'))
                 ->where('type', 'bill')
-                ->whereDate('occurred_on', '>=', $period->start->toDateString())
-                ->whereDate('occurred_on', '<=', $period->end->toDateString())
                 ->orderByDesc('occurred_on')
                 ->get()
+                ->filter(fn (Transaction $row): bool => CoverTag::inWindow(
+                    $row->notes,
+                    $row->occurred_on?->toImmutable(),
+                    $period->start,
+                    $period->end,
+                ))
                 ->groupBy('category_id');
 
         return collect($this->wallets->credits())
@@ -76,6 +125,9 @@ class MonthSheet
                 $item = $latest?->toListItem();
                 $plan = $duePlan > 0 ? $duePlan : $sheetSpent;
                 $spent = $dueSpent > 0 ? $dueSpent : $sheetSpent;
+                $paid = $dues->isNotEmpty()
+                    ? $dues->every(fn (array $due): bool => ($due['paid_on'] ?? null) !== null)
+                    : $sheetSpent > 0;
 
                 return [
                     'id' => $credit['id'],
@@ -84,7 +136,7 @@ class MonthSheet
                     'category_id' => $category?->id,
                     'plan' => $plan,
                     'spent' => $spent,
-                    'paid' => $spent > 0,
+                    'paid' => $paid,
                     'payment' => $item === null ? null : [
                         'id' => $item['id'],
                         'occurred_on' => $item['occurred_on'],
@@ -142,15 +194,24 @@ class MonthSheet
             ->map(function (Debt $debt) use ($period, $sheetPays, $linked): array {
                 $summary = $debt->toSummaryArray();
                 $logged = $debt->spentIn($period->start, $period->end);
+                $covering = $debt->payments->filter(fn (DebtPayment $payment): bool => CoverTag::inWindow(
+                    $payment->notes,
+                    $payment->occurred_on?->toImmutable(),
+                    $period->start,
+                    $period->end,
+                ));
                 $sheet = (float) ($sheetPays->get($debt->category_id) ?? collect())
                     ->filter(function (Transaction $row) use ($period, $linked): bool {
                         if (in_array($row->id, $linked, true)) {
                             return false;
                         }
 
-                        $on = $row->occurred_on?->toImmutable()->startOfDay();
-
-                        return $on !== null && $on->betweenIncluded($period->start->startOfDay(), $period->end->startOfDay());
+                        return CoverTag::inWindow(
+                            $row->notes,
+                            $row->occurred_on?->toImmutable(),
+                            $period->start,
+                            $period->end,
+                        );
                     })
                     ->sum(fn (Transaction $row): float => (float) $row->amount);
                 $spent = round($logged > 0 ? $logged : $sheet, 2);
@@ -163,14 +224,19 @@ class MonthSheet
                 );
                 $due = $this->dueWhen->decorate('loans', $debt->id);
                 $dueThisMonth = $debt->isMonthly() && $open && ($spent > 0 || $inWindow);
+                $prepaid = $spent > 0 && $covering->isNotEmpty() && $covering->every(
+                    fn (DebtPayment $payment): bool => $payment->occurred_on?->toImmutable()->startOfDay()->lt($period->start->startOfDay()) ?? false,
+                );
 
                 return [
                     ...$summary,
                     'due_mode' => $due['mode'],
                     'due_day' => $due['day'],
                     'due_label' => $due['label'],
+                    'covers_on' => $this->dueWhen->dateIn($period->year, $period->month, $due),
                     'due_this_period' => $dueThisMonth && $this->dueWhen->matchesHalf($due, $period->half),
                     'paid_this_period' => $spent > 0,
+                    'prepaid_this_period' => $prepaid,
                     'spent_this_period' => $spent,
                 ];
             })
@@ -209,6 +275,33 @@ class MonthSheet
     }
 
     /**
+     * Cash bills for the dashboard list. Cursor is the 31st pay; the rest sit on the 15th.
+     *
+     * @return list<array{id: string, name: string, amount: float, paid: bool, kind: string}>
+     */
+    public function cashDueRows(Period $period): array
+    {
+        return $this->cashBillRows($period)
+            ->filter(function (array $row) use ($period): bool {
+                return match ($period->half) {
+                    1 => $row['first_pay'],
+                    2 => ! $row['first_pay'],
+                    default => true,
+                };
+            })
+            ->reject(fn (array $row): bool => $row['amount'] <= 0)
+            ->map(fn (array $row): array => [
+                'id' => 'bill-'.$row['id'],
+                'name' => $row['name'],
+                'amount' => $row['amount'],
+                'paid' => $row['paid'],
+                'kind' => 'bill',
+            ])
+            ->values()
+            ->all();
+    }
+
+    /**
      * @param  list<array{id: string, name: string, amount: float, paid: bool, kind: string}>|null  $dues
      * @return array{bills: float, loan: float, living: float}
      */
@@ -232,6 +325,7 @@ class MonthSheet
      *
      * @return array{
      *     living: float,
+     *     credit: float,
      *     first: array{pay: float, bills: list<array{name: string, amount: float}>, bills_total: float, saved: float, leftover: float},
      *     second: array{pay: float, bills: list<array{name: string, amount: float}>, bills_total: float, loans: float, saved: float, leftover: float},
      *     saved: float,
@@ -243,13 +337,8 @@ class MonthSheet
         $month = Period::month($period->year, $period->month);
         $living = $this->livingPlan->for($month->year, $month->month);
         $cash = $this->cashBillRows($month);
-        $credit = $this->computedBills($month)
-            ->filter(fn (array $bill): bool => (float) $bill['plan'] > 0)
-            ->map(fn (array $bill): array => [
-                'name' => $bill['name'],
-                'amount' => round((float) $bill['plan'], 2),
-            ])
-            ->values();
+        $creditDues = $this->creditDues($month);
+        $credit = $this->creditFunding($month, $creditDues);
         $firstBills = $cash
             ->filter(fn (array $row): bool => $row['first_pay'])
             ->map(fn (array $row): array => ['name' => $row['name'], 'amount' => $row['amount']])
@@ -261,9 +350,17 @@ class MonthSheet
             ->values();
         $loans = round((float) $this->loans($month)
             ->filter(fn (array $loan): bool => $loan['due_this_period'])
-            ->sum(fn (array $loan): float => $loan['paid_this_period']
-                ? (float) $loan['spent_this_period']
-                : (float) ($loan['installment_amount'] ?? 0)), 2);
+            ->sum(function (array $loan): float {
+                if ($loan['prepaid_this_period'] ?? false) {
+                    return 0.0;
+                }
+
+                return $loan['paid_this_period']
+                    ? (float) $loan['spent_this_period']
+                    : (float) ($loan['installment_amount'] ?? 0);
+            }), 2);
+        $advance = $this->advancePaid($month);
+        $creditTotal = round((float) $credit->sum('amount'), 2);
         $firstTotal = round((float) $firstBills->sum('amount'), 2);
         $secondTotal = round((float) $secondBills->sum('amount'), 2);
         $firstPay = round((float) ($firstPay ?? 0), 2);
@@ -274,11 +371,12 @@ class MonthSheet
         $nextFirstOn = $monthStart->endOfMonth()->startOfDay();
         $firstSaved = $this->paySavings($firstOn, $secondOn);
         $secondSaved = $this->paySavings($secondOn, $nextFirstOn);
-        $firstLeft = round($firstPay - $living - $firstTotal - $firstSaved, 2);
-        $secondLeft = round($secondPay - $secondTotal - $loans - $secondSaved, 2);
+        $firstLeft = round($firstPay - $living - $firstTotal - $firstSaved - $advance['first'], 2);
+        $secondLeft = round($secondPay - $secondTotal - $loans - $secondSaved - $advance['second'], 2);
 
         return [
             'living' => $living,
+            'credit' => $creditTotal,
             'first' => [
                 'pay' => $firstPay,
                 'bills' => $firstBills->all(),
@@ -304,30 +402,36 @@ class MonthSheet
      * 16–end is the 15th pay (remaining bills + loans).
      *
      * @param  array{
+     *     credit: float,
      *     first: array{bills_total: float, saved: float, leftover: float},
      *     second: array{bills_total: float, loans: float, saved: float, leftover: float},
      *     saved: float,
      *     approx_savings: float
      * }  $funding
-     * @return array{bills: float, loan: float, saved: float, leftover: float}
+     * @return array{bills: float, credit: float, loan: float, saved: float, leftover: float}
      */
     public function payTiles(array $funding, ?int $half): array
     {
+        $credit = round((float) ($funding['credit'] ?? 0), 2);
+
         return match ($half) {
             1 => [
                 'bills' => $funding['first']['bills_total'],
+                'credit' => 0.0,
                 'loan' => 0.0,
                 'saved' => $funding['first']['saved'],
                 'leftover' => $funding['first']['leftover'],
             ],
             2 => [
-                'bills' => $funding['second']['bills_total'],
+                'bills' => round($funding['second']['bills_total'] - $credit, 2),
+                'credit' => $credit,
                 'loan' => $funding['second']['loans'],
                 'saved' => $funding['second']['saved'],
                 'leftover' => $funding['second']['leftover'],
             ],
             default => [
-                'bills' => round($funding['first']['bills_total'] + $funding['second']['bills_total'], 2),
+                'bills' => round($funding['first']['bills_total'] + $funding['second']['bills_total'] - $credit, 2),
+                'credit' => $credit,
                 'loan' => $funding['second']['loans'],
                 'saved' => $funding['saved'],
                 'leftover' => $funding['approx_savings'],
@@ -366,7 +470,7 @@ class MonthSheet
     }
 
     /**
-     * @return Collection<int, array{id: int, name: string, slug: string, amount: float, first_pay: bool}>
+     * @return Collection<int, array{id: int, name: string, slug: string, amount: float, paid: bool, first_pay: bool}>
      */
     private function cashBillRows(Period $period): Collection
     {
@@ -378,28 +482,36 @@ class MonthSheet
             ->get()
             ->reject(fn (Category $bill): bool => $this->wallets->isCreditAccount($bill->slug, $bill->name))
             ->values();
-        $spentByCategory = $bills->isEmpty()
+        $pays = $bills->isEmpty()
             ? collect()
             : Transaction::query()
                 ->whereIn('category_id', $bills->pluck('id'))
                 ->where('type', 'bill')
-                ->whereDate('occurred_on', '>=', $period->start->toDateString())
-                ->whereDate('occurred_on', '<=', $period->end->toDateString())
                 ->get()
-                ->groupBy('category_id')
-                ->map(fn (Collection $rows): float => round((float) $rows->sum(
-                    fn (Transaction $row): float => $row->direction === 'in' ? -(float) $row->amount : (float) $row->amount,
-                ), 2));
+                ->filter(fn (Transaction $row): bool => CoverTag::inWindow(
+                    $row->notes,
+                    $row->occurred_on?->toImmutable(),
+                    $period->start,
+                    $period->end,
+                ))
+                ->groupBy('category_id');
 
-        return $bills->map(function (Category $bill) use ($spentByCategory): array {
+        return $bills->map(function (Category $bill) use ($pays, $period): array {
             $plan = (float) $bill->monthly_plan;
-            $spent = (float) ($spentByCategory->get($bill->id) ?? $spentByCategory->get((string) $bill->id) ?? 0);
+            $rows = $pays->get($bill->id) ?? $pays->get((string) $bill->id) ?? collect();
+            $spent = round((float) $rows->sum(
+                fn (Transaction $row): float => $row->direction === 'in' ? -(float) $row->amount : (float) $row->amount,
+            ), 2);
+            $prepaid = $spent > 0 && $rows->every(
+                fn (Transaction $row): bool => $row->occurred_on?->toImmutable()->startOfDay()->lt($period->start->startOfDay()) ?? false,
+            );
 
             return [
                 'id' => $bill->id,
                 'name' => $bill->name,
                 'slug' => $bill->slug,
-                'amount' => round($plan > 0 && $spent > 0 ? $spent : $plan, 2),
+                'amount' => $prepaid ? 0.0 : round($plan > 0 && $spent > 0 ? $spent : $plan, 2),
+                'paid' => $spent > 0,
                 'first_pay' => $this->isFirstPayBill($bill),
             ];
         })->values();
@@ -435,9 +547,15 @@ class MonthSheet
     private function lastPaidOn(Debt $debt, Collection $sheetPays): ?CarbonImmutable
     {
         $dates = $debt->payments
-            ->map(fn (DebtPayment $payment): ?CarbonImmutable => $payment->occurred_on?->toImmutable()->startOfDay())
+            ->map(fn (DebtPayment $payment): ?CarbonImmutable => CoverTag::on(
+                $payment->notes,
+                $payment->occurred_on?->toImmutable(),
+            ))
             ->concat($sheetPays->map(
-                fn (Transaction $row): ?CarbonImmutable => $row->occurred_on?->toImmutable()->startOfDay(),
+                fn (Transaction $row): ?CarbonImmutable => CoverTag::on(
+                    $row->notes,
+                    $row->occurred_on?->toImmutable(),
+                ),
             ))
             ->filter();
 
@@ -462,6 +580,127 @@ class MonthSheet
             - ($windowStart->year * 12 + $windowStart->month);
 
         return $offset >= 0 && $offset < $remaining;
+    }
+
+    /**
+     * @param  Collection<int, array<string, mixed>>  $creditDues
+     * @return Collection<int, array{name: string, amount: float}>
+     */
+    private function creditFunding(Period $month, Collection $creditDues): Collection
+    {
+        $start = $month->start->startOfDay();
+        $end = $month->end->startOfDay();
+
+        return $this->computedBills($month, $creditDues)
+            ->map(function (array $bill) use ($creditDues, $start, $end): array {
+                $dues = $creditDues->where('wallet_id', $bill['id']);
+                $amount = $dues->isEmpty()
+                    ? (float) $bill['plan']
+                    : (float) $dues
+                        ->filter(function (array $due) use ($start, $end): bool {
+                            $paidOn = $due['paid_on'] ?? null;
+
+                            if ($paidOn === null || $paidOn === '') {
+                                return true;
+                            }
+
+                            $on = CarbonImmutable::parse($paidOn)->startOfDay();
+
+                            return $on->betweenIncluded($start, $end);
+                        })
+                        ->sum('amount');
+
+                return [
+                    'name' => $bill['name'],
+                    'amount' => round($amount, 2),
+                ];
+            })
+            ->filter(fn (array $row): bool => $row['amount'] > 0)
+            ->values();
+    }
+
+    /**
+     * Payments made this month that cover a later due.
+     *
+     * @return array{first: float, second: float}
+     */
+    private function advancePaid(Period $month): array
+    {
+        $start = $month->start->startOfDay();
+        $end = $month->end->startOfDay();
+        $first = 0.0;
+        $second = 0.0;
+        $seen = [];
+
+        foreach ($this->wallets->duesForPeriod($end->addDay(), $end->startOfMonth()->addMonths(2)->endOfMonth()) as $due) {
+            $paidOn = $due['paid_on'] ?? null;
+
+            if ($paidOn === null || $paidOn === '') {
+                continue;
+            }
+
+            $on = CarbonImmutable::parse($paidOn)->startOfDay();
+
+            if (! $on->betweenIncluded($start, $end)) {
+                continue;
+            }
+
+            $dueOn = CarbonImmutable::parse($due['due_on'])->startOfDay();
+
+            if ($dueOn->lte($end)) {
+                continue;
+            }
+
+            $this->addAdvance($first, $second, $on, (float) $due['amount']);
+            $seen[] = $due['id'];
+        }
+
+        $rows = Transaction::query()
+            ->whereIn('type', ['bill', 'debt_payment'])
+            ->whereDate('occurred_on', '>=', $start->toDateString())
+            ->whereDate('occurred_on', '<=', $end->toDateString())
+            ->get();
+
+        foreach ($rows as $row) {
+            $covers = CoverTag::on($row->notes, $row->occurred_on?->toImmutable());
+
+            if ($covers === null || $covers->lte($end)) {
+                continue;
+            }
+
+            $dueId = DueTag::id($row->notes);
+
+            if ($dueId !== null && in_array($dueId, $seen, true)) {
+                continue;
+            }
+
+            $this->addAdvance($first, $second, $row->occurred_on->toImmutable()->startOfDay(), (float) $row->amount);
+        }
+
+        return ['first' => round($first, 2), 'second' => round($second, 2)];
+    }
+
+    private function addAdvance(float &$first, float &$second, CarbonImmutable $paidOn, float $amount): void
+    {
+        if ($paidOn->day <= 15) {
+            $first += $amount;
+
+            return;
+        }
+
+        $second += $amount;
+    }
+
+    private function isCurrent(Period $period): bool
+    {
+        $today = CarbonImmutable::today()->startOfDay();
+
+        return $today->betweenIncluded($period->start->startOfDay(), $period->end->startOfDay());
+    }
+
+    private function isFuture(Period $period): bool
+    {
+        return CarbonImmutable::today()->startOfDay()->lt($period->start->startOfDay());
     }
 
     private function isSPayOrLazPay(array $credit): bool

@@ -8,9 +8,11 @@ use App\Models\Debt;
 use App\Models\SavingsEntry;
 use App\Models\Transaction;
 use App\Services\Wallets;
+use App\Support\CoverTag;
 use App\Support\CreditTag;
 use App\Support\DueTag;
 use App\Support\PayTag;
+use Carbon\CarbonImmutable;
 use Illuminate\Http\RedirectResponse;
 use InvalidArgumentException;
 
@@ -85,8 +87,6 @@ class PayController extends Controller
             return back()->with('success', $bill->name.' charged to '.$source['name'].'.');
         }
 
-        $notes = PayTag::wrap($data['payment_method'], $data['notes'] ?? null);
-
         Transaction::query()->create([
             'occurred_on' => $data['occurred_on'],
             'amount' => $data['amount'],
@@ -94,7 +94,7 @@ class PayController extends Controller
             'type' => 'bill',
             'category_id' => $bill->id,
             'description' => $bill->name,
-            'notes' => $notes,
+            'notes' => $this->paymentNotes($data),
         ]);
 
         return back()->with('success', $bill->name.' paid.');
@@ -145,7 +145,7 @@ class PayController extends Controller
             'occurred_on' => $data['occurred_on'],
             'amount' => $data['amount'],
             'description' => $bill->name,
-            'notes' => PayTag::wrap($data['payment_method'], $data['notes'] ?? null),
+            'notes' => $this->paymentNotes($data),
         ]);
 
         return back()->with('success', $bill->name.' updated.');
@@ -159,25 +159,37 @@ class PayController extends Controller
     {
         abort_unless($source['group'] !== 'credit', 422, 'Pay this installment with cash, a wallet, or a bank.');
 
-        $dueId = DueTag::id($transaction->notes);
-        abort_unless($dueId !== null && $dueId === (string) $data['target_id'], 422);
+        $ids = DueTag::ids($transaction->notes);
+        abort_unless($ids !== [] && in_array((string) $data['target_id'], $ids, true), 422);
 
-        $match = $wallets->findDue($dueId);
+        $match = $wallets->findDue($ids[0]);
         abort_if($match === null, 404);
         abort_unless(($match['due']['paid_on'] ?? null) !== null, 422, 'This installment is not paid yet.');
         abort_unless((int) ($match['due']['transaction_id'] ?? 0) === $transaction->id, 422);
 
-        $label = $match['wallet']['name'].' · '.$match['charge']['description'].' '.$match['due']['n'].'/'.$match['charge']['months'];
+        $amount = 0.0;
+
+        foreach ($ids as $id) {
+            $row = $wallets->findDue($id);
+            abort_if($row === null, 404);
+            abort_unless((int) ($row['due']['transaction_id'] ?? 0) === $transaction->id, 422);
+            $amount += (float) $row['due']['amount'];
+        }
+
+        $dueOn = $match['due']['due_on'];
+        $label = $match['wallet']['name'].' · '.CarbonImmutable::parse($dueOn)->format('M j');
 
         $transaction->update([
             'occurred_on' => $data['occurred_on'],
-            'amount' => $match['due']['amount'],
+            'amount' => round($amount, 2),
             'description' => $label,
-            'notes' => DueTag::wrap($dueId, PayTag::wrap($data['payment_method'], $data['notes'] ?? null)),
+            'notes' => $this->paymentNotes($data, $ids, $dueOn),
         ]);
 
         try {
-            $wallets->updateDuePaidOn($dueId, $data['occurred_on']);
+            foreach ($ids as $id) {
+                $wallets->updateDuePaidOn($id, $data['occurred_on']);
+            }
         } catch (InvalidArgumentException $exception) {
             return back()->with('error', $exception->getMessage());
         }
@@ -208,7 +220,7 @@ class PayController extends Controller
     private function payLoan(array $data): RedirectResponse
     {
         $debt = Debt::query()->findOrFail($data['target_id']);
-        $notes = PayTag::wrap($data['payment_method'], $data['notes'] ?? null);
+        $notes = $this->paymentNotes($data);
         $nextInstallment = $debt->nextInstallmentNo();
 
         $transaction = Transaction::query()->create([
@@ -261,14 +273,19 @@ class PayController extends Controller
     {
         $match = $wallets->findDue((string) $data['target_id']);
         abort_if($match === null, 404);
-        abort_unless(($match['due']['paid_on'] ?? null) === null, 422, 'This installment is already paid.');
 
-        $label = $match['wallet']['name'].' · '.$match['charge']['description'].' '.$match['due']['n'].'/'.$match['charge']['months'];
-        $notes = DueTag::wrap($match['due']['id'], PayTag::wrap($data['payment_method'], $data['notes'] ?? null));
+        $unpaid = $wallets->unpaidStatementDues($match['due']['id']);
+        abort_if($unpaid === [], 422, 'This installment is already paid.');
+
+        $ids = array_column($unpaid, 'id');
+        $dueOn = $match['due']['due_on'];
+        $label = $match['wallet']['name'].' · '.CarbonImmutable::parse($dueOn)->format('M j');
+        $notes = $this->paymentNotes($data, $ids, $dueOn);
+        $amount = round((float) array_sum(array_column($unpaid, 'amount')), 2);
 
         $transaction = Transaction::query()->create([
             'occurred_on' => $data['occurred_on'],
-            'amount' => $data['amount'],
+            'amount' => $amount,
             'direction' => 'out',
             'type' => 'bill',
             'category_id' => null,
@@ -277,7 +294,7 @@ class PayController extends Controller
         ]);
 
         try {
-            $wallets->markDuePaid($match['due']['id'], $transaction->id, $data['occurred_on']);
+            $wallets->markStatementPaid($match['due']['id'], $transaction->id, $data['occurred_on']);
         } catch (InvalidArgumentException $exception) {
             $transaction->delete();
 
@@ -285,5 +302,26 @@ class PayController extends Controller
         }
 
         return back()->with('success', $label.' paid.');
+    }
+
+    /**
+     * @param  array<string, mixed>  $data
+     * @param  string|list<string>|null  $dueId
+     */
+    private function paymentNotes(array $data, string|array|null $dueId = null, ?string $coversOn = null): ?string
+    {
+        $notes = PayTag::wrap($data['payment_method'] ?? null, $data['notes'] ?? null);
+        $covers = $coversOn ?? $data['covers_on'] ?? null;
+        $occurred = $data['occurred_on'] ?? null;
+
+        if (is_string($covers) && $covers !== '' && $covers !== $occurred) {
+            $notes = CoverTag::wrap($covers, $notes);
+        }
+
+        if ($dueId !== null && $dueId !== []) {
+            $notes = DueTag::wrap($dueId, $notes);
+        }
+
+        return $notes;
     }
 }

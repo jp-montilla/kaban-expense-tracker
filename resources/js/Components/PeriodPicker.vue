@@ -17,7 +17,7 @@ export interface PeriodValue {
 const props = withDefaults(defineProps<{
     period: PeriodValue
     base: string
-    tone?: 'page' | 'hero'
+    tone?: 'page' | 'hero' | 'toolbar'
     allowAll?: boolean
     monthOnly?: boolean
 }>(), {
@@ -109,9 +109,17 @@ const years = computed(() => {
     return [...values].sort((left, right) => left - right)
 })
 
-const fieldClass = computed(() => props.tone === 'hero'
-    ? 'rounded-full border-0 bg-white/15 px-3 py-1.5 text-sm font-medium text-white'
-    : 'field py-1.5 text-sm')
+const fieldClass = computed(() => {
+    if (props.tone === 'hero') {
+        return 'rounded-full border-0 bg-white/15 px-3 py-1.5 text-sm font-medium text-white'
+    }
+
+    if (props.tone === 'toolbar') {
+        return 'rounded-full border border-line bg-paper px-3 py-2 text-sm font-medium text-ink'
+    }
+
+    return 'field py-1.5 text-sm'
+})
 </script>
 
 <template>

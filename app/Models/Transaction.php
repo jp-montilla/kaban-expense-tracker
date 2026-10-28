@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Models\Concerns\BelongsToUser;
 use App\Models\Concerns\Trashable;
+use App\Support\CoverTag;
 use App\Support\CreditTag;
 use App\Support\DueTag;
 use App\Support\PayTag;
@@ -53,8 +54,9 @@ class Transaction extends Model
         return [
             'id' => $this->id,
             'occurred_on' => $this->occurred_on->toDateString(),
+            'covers_on' => CoverTag::on($this->notes, $this->occurred_on)?->toDateString(),
             'description' => $this->description,
-            'notes' => CreditTag::strip(DueTag::strip(PayTag::strip($this->notes))),
+            'notes' => CoverTag::strip(CreditTag::strip(DueTag::strip(PayTag::strip($this->notes)))),
             'payment_method' => $credit['slug'] ?? PayTag::slug($this->notes),
             'due_id' => DueTag::id($this->notes),
             'via_credit' => $credit !== null,

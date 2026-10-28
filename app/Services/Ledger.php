@@ -99,6 +99,7 @@ class Ledger
                 'latest_income' => $latestSalary ? (float) $latestSalary->amount : null,
                 'latest_since' => $latestSalary?->effective_on->toDateString(),
                 'view_bills' => Money::pesos($viewTotals['bills']),
+                'view_credit' => 0.0,
                 'view_loan' => Money::pesos($viewTotals['loan']),
                 'view_daily' => Money::pesos($variableLeft),
                 'living_plan' => Money::pesos($livingCents),

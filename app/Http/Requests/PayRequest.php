@@ -27,6 +27,7 @@ class PayRequest extends FormRequest
                 Rule::when($this->input('kind') === 'credit_due', ['uuid'], ['integer']),
             ],
             'occurred_on' => ['required', 'date'],
+            'covers_on' => ['nullable', 'date'],
             'amount' => [$viaCredit ? 'nullable' : 'required', 'numeric', 'min:0.01', 'max:99999999'],
             'payment_method' => ['required', 'string', 'max:40'],
             'notes' => ['nullable', 'string', 'max:1000'],

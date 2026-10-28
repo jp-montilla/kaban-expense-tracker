@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\Category;
+use App\Models\Debt;
 use App\Models\Transaction;
 use App\Models\User;
 use App\Services\Wallets;
@@ -106,7 +107,7 @@ class PaymentOptionsTest extends TestCase
         $this->assertTrue(
             Transaction::query()
                 ->where('type', 'bill')
-                ->where('description', 'like', '%Headphones%')
+                ->where('description', 'like', '%SPay%')
                 ->where('amount', 1000)
                 ->exists()
         );
@@ -223,7 +224,7 @@ class PaymentOptionsTest extends TestCase
         $this->get('/bills?year=2026&month=11')
             ->assertOk()
             ->assertInertia(fn (Assert $page) => $page
-                ->where('pay_on', '2026-11-15')
+                ->where('pay_on', '2026-10-22')
                 ->where('credit_dues', fn ($rows) => collect($rows)->pluck('description')->all() === ['Spay'])
                 ->where('computed_bills', fn ($rows) => collect($rows)->contains(
                     fn ($row) => ($row['slug'] ?? null) === 'spay'
@@ -285,7 +286,7 @@ class PaymentOptionsTest extends TestCase
         $this->get('/bills?year=2026&month=11')
             ->assertOk()
             ->assertInertia(fn (Assert $page) => $page
-                ->where('pay_on', '2026-11-15')
+                ->where('pay_on', '2026-10-24')
                 ->where('totals.loan', 15050)
                 ->where('totals.bills', 10460)
                 ->where('computed_bills', fn ($rows) => collect($rows)->pluck('slug')->sort()->values()->all() === ['lazpay', 'spay'])
@@ -607,5 +608,246 @@ class PaymentOptionsTest extends TestCase
             CarbonImmutable::parse('2026-11-01'),
             CarbonImmutable::parse('2026-11-30'),
         ))->contains(fn (array $due): bool => $due['description'] === 'Maynilad' && $due['n'] === 2));
+    }
+
+    public function test_a_future_credit_due_can_be_paid_in_advance(): void
+    {
+        $this->travelTo('2026-10-28');
+        $this->seed(LedgerSeeder::class);
+        $this->actingAs(User::owner());
+
+        $wallets = app(Wallets::class);
+        $spay = collect($wallets->all())->firstWhere('slug', 'spay');
+
+        $this->post("/wallets/{$spay['id']}/charges", [
+            'description' => 'Headphones',
+            'months' => 3,
+            'monthly' => 1000,
+            'first_due_on' => '2026-11-15',
+        ])->assertRedirect();
+
+        $this->get('/bills?year=2026&month=10')
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('pay_on', '2026-10-28')
+                ->where('advance_dues', fn ($rows) => collect($rows)->contains(
+                    fn ($due) => ($due['description'] ?? null) === 'Headphones'
+                        && ($due['due_on'] ?? null) === '2026-11-15'
+                        && ($due['advance'] ?? false) === true
+                        && ($due['payable'] ?? false) === true,
+                )));
+
+        $this->get('/bills?year=2026&month=11')
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('pay_on', '2026-10-28'));
+
+        $due = collect($wallets->duesForPeriod(
+            CarbonImmutable::parse('2026-11-01'),
+            CarbonImmutable::parse('2026-11-30'),
+        ))->firstWhere('description', 'Headphones');
+
+        $this->assertNotNull($due);
+
+        $this->post('/pay', [
+            'kind' => 'credit_due',
+            'target_id' => $due['id'],
+            'occurred_on' => '2026-10-28',
+            'covers_on' => '2026-11-15',
+            'amount' => 1000,
+            'payment_method' => 'cash',
+        ])->assertRedirect();
+
+        $this->assertSame('2026-10-28', $wallets->findDue($due['id'])['due']['paid_on']);
+
+        $this->get('/bills?year=2026&month=11')
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('computed_bills', fn ($rows) => collect($rows)->contains(
+                    fn ($row) => ($row['slug'] ?? null) === 'spay'
+                        && ($row['paid'] ?? false) === true
+                        && (float) $row['spent'] >= 1000,
+                ))
+                ->where('credit_dues', fn ($rows) => collect($rows)->contains(
+                    fn ($row) => ($row['id'] ?? null) === $due['id'] && ($row['payable'] ?? true) === false,
+                )));
+
+        $this->get('/bills?year=2026&month=10')
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('advance_dues', fn ($rows) => collect($rows)->doesntContain(
+                    fn ($row) => ($row['id'] ?? null) === $due['id'],
+                ))
+                ->where('payments', fn ($rows) => collect($rows)->contains(
+                    fn ($row) => ($row['due_id'] ?? null) === $due['id']
+                        && ($row['occurred_on'] ?? null) === '2026-10-28',
+                )));
+    }
+
+    public function test_a_future_bill_and_loan_can_be_paid_in_advance(): void
+    {
+        $this->travelTo('2026-10-28');
+        $this->seed(LedgerSeeder::class);
+        $this->actingAs(User::owner());
+
+        $meralco = Category::query()->where('slug', 'meralco')->firstOrFail();
+        $loan = Debt::query()->where('name', 'iPhone 16')->firstOrFail();
+
+        $this->post('/pay', [
+            'kind' => 'bill',
+            'target_id' => $meralco->id,
+            'occurred_on' => '2026-10-28',
+            'covers_on' => '2026-11-15',
+            'amount' => 5650.64,
+            'payment_method' => 'cash',
+        ])->assertRedirect();
+
+        $this->post('/pay', [
+            'kind' => 'loan',
+            'target_id' => $loan->id,
+            'occurred_on' => '2026-10-28',
+            'covers_on' => '2026-11-15',
+            'amount' => 2000,
+            'payment_method' => 'cash',
+        ])->assertRedirect();
+
+        $this->get('/bills?year=2026&month=11')
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('bills', fn ($rows) => collect($rows)->contains(
+                    fn ($bill) => ($bill['slug'] ?? null) === 'meralco'
+                        && ($bill['paid'] ?? false) === true
+                        && (float) $bill['spent'] === 5650.64,
+                ))
+                ->where('loans', fn ($rows) => collect($rows)->contains(
+                    fn ($row) => $row['name'] === 'iPhone 16'
+                        && ($row['paid_this_period'] ?? false) === true
+                        && (float) $row['spent_this_period'] === 2000.0,
+                )));
+
+        $this->get('/bills?year=2026&month=10')
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('bills', fn ($rows) => collect($rows)->contains(
+                    fn ($bill) => ($bill['slug'] ?? null) === 'meralco' && ($bill['paid'] ?? true) === false,
+                ))
+                ->where('loans', fn ($rows) => collect($rows)->contains(
+                    fn ($row) => $row['name'] === 'iPhone 16'
+                        && ($row['paid_this_period'] ?? false) === true
+                        && (float) $row['spent_this_period'] === 2000.0,
+                )));
+    }
+
+    public function test_a_future_month_does_not_total_dues_from_other_months(): void
+    {
+        $this->travelTo('2026-10-28');
+        $this->seed(LedgerSeeder::class);
+        $this->actingAs(User::owner());
+
+        $wallets = app(Wallets::class);
+        $spay = collect($wallets->all())->firstWhere('slug', 'spay');
+
+        $this->post("/wallets/{$spay['id']}/charges", [
+            'description' => 'Headphones',
+            'months' => 3,
+            'monthly' => 1000,
+            'first_due_on' => '2026-11-15',
+        ])->assertRedirect();
+
+        $this->get('/bills?year=2026&month=11')
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('advance_dues', fn ($rows) => collect($rows)->isEmpty())
+                ->where('credit_dues', fn ($rows) => collect($rows)->contains(
+                    fn ($due) => ($due['description'] ?? null) === 'Headphones' && ($due['n'] ?? null) === 1,
+                ) && collect($rows)->doesntContain(
+                    fn ($due) => ($due['description'] ?? null) === 'Headphones' && ($due['n'] ?? null) === 2,
+                ))
+                ->where('computed_bills', fn ($rows) => collect($rows)->contains(
+                    fn ($row) => ($row['slug'] ?? null) === 'spay' && (float) $row['plan'] === 1000.0,
+                )));
+
+        $this->get('/bills?year=2026&month=12')
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('advance_dues', fn ($rows) => collect($rows)->isEmpty())
+                ->where('credit_dues', fn ($rows) => collect($rows)->contains(
+                    fn ($due) => ($due['description'] ?? null) === 'Headphones' && ($due['n'] ?? null) === 2,
+                ) && collect($rows)->doesntContain(
+                    fn ($due) => ($due['description'] ?? null) === 'Headphones' && ($due['n'] ?? null) === 1,
+                ))
+                ->where('computed_bills', fn ($rows) => collect($rows)->contains(
+                    fn ($row) => ($row['slug'] ?? null) === 'spay' && (float) $row['plan'] === 1000.0,
+                )));
+
+        $this->get('/?year=2026&month=12')
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('dues', fn ($rows) => collect($rows)->contains(
+                    fn ($row) => ($row['name'] ?? null) === 'SPay' && (float) $row['amount'] === 1000.0,
+                )));
+    }
+
+    public function test_same_day_spay_charges_pay_as_one_bill(): void
+    {
+        $this->travelTo('2026-10-28');
+        $this->seed(LedgerSeeder::class);
+        $this->actingAs(User::owner());
+
+        $this->post('/log', [
+            'occurred_on' => '2026-10-25',
+            'items' => [
+                [
+                    'description' => 'Gambit',
+                    'amount' => 380.17,
+                    'type' => 'daily',
+                    'via_credit' => true,
+                    'credit_method' => 'spay',
+                    'credit_months' => 1,
+                ],
+                [
+                    'description' => 'Cartoon toothbrush',
+                    'amount' => 278.15,
+                    'type' => 'daily',
+                    'via_credit' => true,
+                    'credit_method' => 'spay',
+                    'credit_months' => 1,
+                ],
+            ],
+        ])->assertRedirect();
+
+        $wallets = app(Wallets::class);
+        $november = collect($wallets->duesForPeriod(
+            CarbonImmutable::parse('2026-11-01'),
+            CarbonImmutable::parse('2026-11-30'),
+        ));
+
+        $this->assertCount(2, $november);
+        $this->assertSame(658.32, round((float) $november->sum('amount'), 2));
+
+        $this->post('/pay', [
+            'kind' => 'credit_due',
+            'target_id' => $november->first()['id'],
+            'occurred_on' => '2026-10-28',
+            'amount' => 380.17,
+            'payment_method' => 'cash',
+        ])->assertRedirect();
+
+        foreach ($november as $due) {
+            $this->assertNotNull($wallets->findDue($due['id'])['due']['paid_on']);
+        }
+
+        $this->assertTrue(
+            Transaction::query()->where('type', 'bill')->where('amount', 658.32)->exists()
+        );
+
+        $this->get('/bills?year=2026&month=11')
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('computed_bills', fn ($rows) => collect($rows)->contains(
+                    fn ($row) => ($row['slug'] ?? null) === 'spay'
+                        && (float) $row['plan'] === 658.32
+                        && ($row['paid'] ?? false) === true,
+                )));
     }
 }

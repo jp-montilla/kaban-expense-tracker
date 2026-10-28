@@ -159,25 +159,11 @@ final class Period
         $start = $this->start->startOfDay();
         $end = $this->end->startOfDay();
 
-        if ($today->betweenIncluded($start, $end)) {
-            return $today->toDateString();
-        }
-
         if ($today->gt($end)) {
             return $end->toDateString();
         }
 
-        $on = $start->day(min(15, $end->day));
-
-        if ($on->lt($start)) {
-            $on = $start;
-        }
-
-        if ($on->gt($end)) {
-            $on = $end;
-        }
-
-        return $on->toDateString();
+        return $today->toDateString();
     }
 
     /**

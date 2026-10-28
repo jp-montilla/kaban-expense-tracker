@@ -2,8 +2,12 @@
 import { Head, router, useForm, usePage } from '@inertiajs/vue3'
 import { computed, ref } from 'vue'
 import AppLayout from '../../Components/AppLayout.vue'
-import PageHero from '../../Components/PageHero.vue'
+import DashPanel from '../../Components/DashPanel.vue'
 import Modal from '../../Components/Modal.vue'
+import OverviewTiles from '../../Components/OverviewTiles.vue'
+import type { OverviewTile } from '../../Components/OverviewTiles.vue'
+import PageHeader from '../../Components/PageHeader.vue'
+import PageHero from '../../Components/PageHero.vue'
 import PaySourceSelect from '../../Components/PaySourceSelect.vue'
 import { confirmDelete } from '../../lib/confirm'
 import DueWhenFields from '../../Components/DueWhenFields.vue'
@@ -14,6 +18,7 @@ import type { WalletRow } from '../../lib/wallets'
 interface Payment {
     id: number
     occurred_on: string
+    covers_on: string | null
     amount: number
     installment_no: number | null
     notes: string | null
@@ -40,6 +45,7 @@ interface DebtItem {
     due_mode: DueMode
     due_day: number | null
     due_label: string | null
+    covers_on: string
     payments: Payment[]
 }
 
@@ -97,6 +103,7 @@ function paymentForm(debt: DebtItem) {
         kind: 'loan',
         target_id: debt.id,
         occurred_on: page.props.today,
+        covers_on: debt.covers_on,
         amount: debt.installment_amount === null ? '' : String(debt.installment_amount),
         payment_method: props.wallets[0]?.slug ?? '',
         notes: '',
@@ -121,6 +128,7 @@ function pay(debt: DebtItem) {
         onSuccess: () => {
             form.reset('notes')
             form.amount = debt.installment_amount === null ? '' : String(debt.installment_amount)
+            form.covers_on = debt.covers_on
             form.payment_method = props.wallets[0]?.slug ?? ''
             paying.value = null
         },
@@ -222,6 +230,13 @@ const paidTotal = computed(() => props.debts.reduce((sum, debt) => sum + debt.pa
 const principalTotal = computed(() => props.debts.reduce((sum, debt) => sum + debt.principal, 0))
 const openCount = computed(() => props.debts.filter((debt) => debt.status !== 'paid').length)
 
+const overview = computed<OverviewTile[]>(() => [
+    { label: 'Left', value: pesos(remaining.value), valueClass: remaining.value > 0 ? 'text-clay' : 'text-palm-deep', icon: 'lock', wrap: 'bg-[#E8F1FF] text-income' },
+    { label: 'Paid', value: pesos(paidTotal.value), icon: 'check', wrap: 'bg-[#E8F8EF] text-palm-deep' },
+    { label: 'Principal', value: pesos(principalTotal.value), icon: 'loan', wrap: 'bg-[#EEEBFF] text-accent' },
+    { label: 'Open', value: String(openCount.value), icon: 'bills', wrap: 'bg-[#FFF4E5] text-gold' },
+])
+
 function terms(debt: DebtItem) {
     if (debt.status === 'paid') {
         return 'Paid'
@@ -238,38 +253,26 @@ function terms(debt: DebtItem) {
 <template>
     <Head title="Loan" />
     <AppLayout>
+        <template #header>
+            <PageHeader title="Loan" subtitle="Balances still open." />
+        </template>
         <template #hero>
             <PageHero
-                eyebrow="Loan"
                 label="Left"
                 :value="pesos(remaining)"
-                :pill="`${openCount} open`"
+                :hint="`${openCount} open`"
             />
         </template>
-        <dl class="card stat-grid">
-            <div>
-                <dt>Left</dt>
-                <dd class="num" :class="remaining > 0 ? 'text-clay' : 'text-palm-deep'">{{ pesos(remaining) }}</dd>
+        <DashPanel title="Overview" icon="chart" icon-wrap="bg-[#EEEBFF] text-accent">
+            <div class="px-5 pb-5">
+                <OverviewTiles :tiles="overview" />
             </div>
-            <div>
-                <dt>Paid</dt>
-                <dd class="num">{{ pesos(paidTotal) }}</dd>
-            </div>
-            <div>
-                <dt>Principal</dt>
-                <dd class="num">{{ pesos(principalTotal) }}</dd>
-            </div>
-            <div>
-                <dt>Open</dt>
-                <dd class="num">{{ openCount }}</dd>
-            </div>
-        </dl>
+        </DashPanel>
 
-        <section class="card mt-4 overflow-x-auto">
-            <div class="sheet-head">
-                <h2>Loans</h2>
+        <DashPanel class="mt-4" title="Loans" icon="lock" icon-wrap="bg-[#E8F1FF] text-income">
+            <template #actions>
                 <button type="button" class="btn-ghost py-1 text-xs" @click="adding = true">Add</button>
-            </div>
+            </template>
             <table class="data-table min-w-[40rem]">
                 <caption class="sr-only">Loans</caption>
                 <thead>
@@ -305,7 +308,7 @@ function terms(debt: DebtItem) {
                     </tr>
                 </tbody>
             </table>
-        </section>
+        </DashPanel>
 
         <Modal v-model="adding" title="Add loan">
             <form class="grid gap-3 sm:grid-cols-2" @submit.prevent="createDebt">
@@ -427,6 +430,7 @@ function terms(debt: DebtItem) {
                         <td>
                             <template v-if="payment.installment_no">#{{ payment.installment_no }} · </template>
                             {{ prettyDay(payment.occurred_on) }}
+                            <span v-if="payment.covers_on && payment.covers_on !== payment.occurred_on" class="text-moss"> · covers {{ prettyDay(payment.covers_on) }}</span>
                             <span v-if="payment.notes" class="text-moss"> · {{ payment.notes }}</span>
                         </td>
                         <td class="num text-right">{{ pesos(payment.amount) }}</td>
@@ -441,9 +445,16 @@ function terms(debt: DebtItem) {
         <Modal v-if="paying" v-model="payOpen" :title="`Pay ${paying.name}`">
             <form class="grid gap-3" @submit.prevent="pay(paying)">
                 <label class="grid gap-1">
-                    <span class="kicker">Date</span>
+                    <span class="kicker">Paid on</span>
                     <input v-model="formFor(paying).occurred_on" type="date" required class="field">
                 </label>
+                <label class="grid gap-1">
+                    <span class="kicker">Covers</span>
+                    <input v-model="formFor(paying).covers_on" type="date" required class="field">
+                </label>
+                <p v-if="formFor(paying).covers_on && formFor(paying).occurred_on < formFor(paying).covers_on" class="text-sm text-moss">
+                    Paying in advance for {{ prettyDay(formFor(paying).covers_on) }}.
+                </p>
                 <label class="grid gap-1">
                     <span class="kicker">Amount</span>
                     <input v-model="formFor(paying).amount" type="number" required min="0.01" step="0.01" class="field">

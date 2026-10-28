@@ -2,12 +2,14 @@
 import { Head, router, useForm, usePage } from '@inertiajs/vue3'
 import { computed, ref } from 'vue'
 import AppLayout from '../../Components/AppLayout.vue'
-import PageHero from '../../Components/PageHero.vue'
+import DashPanel from '../../Components/DashPanel.vue'
 import Modal from '../../Components/Modal.vue'
+import PageHeader from '../../Components/PageHeader.vue'
+import PageHero from '../../Components/PageHero.vue'
 import PeriodPicker from '../../Components/PeriodPicker.vue'
 import type { PeriodValue } from '../../Components/PeriodPicker.vue'
 import { confirmDelete } from '../../lib/confirm'
-import { pesos, tone } from '../../lib/money'
+import { pesos } from '../../lib/money'
 
 interface Entry {
     id: number
@@ -55,6 +57,7 @@ const editForm = useForm({
 })
 
 const viewingAll = computed(() => props.period.span === 'all')
+const latest = computed(() => props.entries[0] ?? null)
 
 function openAdd() {
     form.occurred_on = page.props.today
@@ -112,74 +115,62 @@ function prettyDay(iso: string) {
     })
 }
 
-function kindLabel(entry: Entry) {
-    if (entry.opening) {
-        return 'Starting pile'
+function rowLabel(entry: Entry) {
+    if (entry.notes) {
+        return entry.notes
     }
 
-    return entry.direction === 'in' ? 'Put in' : 'Took out'
+    if (entry.opening) {
+        return 'Starting balance'
+    }
+
+    return entry.direction === 'out' ? 'Took out' : 'Deposit'
 }
 </script>
 
 <template>
     <Head title="Savings" />
     <AppLayout>
+        <template #header>
+            <PageHeader title="Savings" :subtitle="`Deposits and take-outs · ${period.label}`">
+                <PeriodPicker :period="period" allow-all base="/savings" tone="toolbar" />
+            </PageHeader>
+        </template>
+
         <template #hero>
             <PageHero
-                :eyebrow="`Savings · ${period.label}`"
-                label="Pile"
+                label="Saved"
                 :value="pesos(balance)"
-                :pill="viewingAll ? `${entries.length} entries` : `This period ${pesos(month_saved)}`"
-            />
+                :hint="latest ? `Last ${prettyDay(latest.occurred_on)}` : null"
+            >
+                <p v-if="!viewingAll">This period {{ pesos(month_saved) }}</p>
+            </PageHero>
         </template>
-        <dl class="card stat-grid">
-            <div>
-                <dt>{{ viewingAll ? 'Put in' : 'This period' }}</dt>
-                <dd class="num">{{ pesos(month_saved) }}</dd>
-            </div>
-            <div>
-                <dt>Pile</dt>
-                <dd class="num">{{ pesos(balance) }}</dd>
-            </div>
-            <div>
-                <dt>Budget left</dt>
-                <dd class="num" :class="tone(cash_left)">{{ pesos(cash_left) }}</dd>
-            </div>
-            <div>
-                <dt>Entries</dt>
-                <dd class="num">{{ entries.length }}</dd>
-            </div>
-        </dl>
 
-        <section class="card mt-4 overflow-x-auto">
-            <div class="sheet-head">
-                <h2>{{ viewingAll ? 'All savings' : 'This period' }}</h2>
-                <div class="flex items-center gap-2">
-                    <PeriodPicker :period="period" allow-all base="/savings" />
-                    <button type="button" class="btn-ghost py-1 text-xs" @click="openAdd">Add</button>
-                </div>
-            </div>
+        <DashPanel title="Log" icon="savings" icon-wrap="bg-[#E8F8EF] text-palm-deep">
+            <template #actions>
+                <button type="button" class="btn-ghost py-1 text-xs" @click="openAdd">Add</button>
+            </template>
             <table class="data-table">
-                <caption class="sr-only">Savings</caption>
+                <caption class="sr-only">Savings log</caption>
                 <thead>
                     <tr>
-                        <th scope="col">Kind</th>
                         <th scope="col">Date</th>
+                        <th scope="col">Note</th>
                         <th scope="col" class="text-right">Amount</th>
                         <th scope="col"><span class="sr-only">Actions</span></th>
                     </tr>
                 </thead>
                 <tbody>
                     <tr v-if="entries.length === 0">
-                        <td colspan="4" class="text-moss">Nothing saved in this view yet.</td>
+                        <td colspan="4" class="py-8 text-center text-moss">No deposits in this view.</td>
                     </tr>
                     <tr v-for="entry in entries" :key="entry.id">
-                        <td>
-                            {{ kindLabel(entry) }}
-                            <span v-if="entry.notes" class="text-moss"> · {{ entry.notes }}</span>
+                        <td class="whitespace-nowrap">{{ prettyDay(entry.occurred_on) }}</td>
+                        <td>{{ rowLabel(entry) }}</td>
+                        <td class="num text-right" :class="entry.direction === 'out' ? 'text-clay' : 'text-palm-deep'">
+                            {{ entry.direction === 'out' ? '−' : '' }}{{ pesos(entry.amount) }}
                         </td>
-                        <td class="whitespace-nowrap text-moss">{{ prettyDay(entry.occurred_on) }}</td>
-                        <td class="num text-right">{{ pesos(entry.amount) }}</td>
                         <td class="whitespace-nowrap text-right">
                             <button type="button" class="row-edit" @click="openEdit(entry)">Edit</button>
                             <button type="button" class="row-del" @click="removeEntry(entry)">Delete</button>
@@ -187,7 +178,7 @@ function kindLabel(entry: Entry) {
                     </tr>
                 </tbody>
             </table>
-        </section>
+        </DashPanel>
 
         <Modal v-if="adding" v-model="adding" title="Add savings">
             <form class="grid gap-3" @submit.prevent="addEntry">

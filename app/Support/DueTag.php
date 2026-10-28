@@ -4,21 +4,38 @@ namespace App\Support;
 
 final class DueTag
 {
-    public static function wrap(string $id, ?string $notes): ?string
+    public static function wrap(string|array $id, ?string $notes): ?string
     {
         $clean = self::strip($notes);
-        $prefix = '[[due:'.$id.']]';
+        $ids = array_values(array_unique(array_filter(array_map(
+            static fn (mixed $value): string => strtolower((string) $value),
+            (array) $id,
+        ))));
+
+        if ($ids === []) {
+            return $clean;
+        }
+
+        $prefix = implode(' ', array_map(static fn (string $value): string => '[[due:'.$value.']]', $ids));
 
         return $clean ? $prefix.' '.$clean : $prefix;
     }
 
-    public static function id(?string $notes): ?string
+    /**
+     * @return list<string>
+     */
+    public static function ids(?string $notes): array
     {
-        if ($notes === null || preg_match('/\[\[due:([a-f0-9-]{36})\]\]/i', $notes, $match) !== 1) {
-            return null;
+        if ($notes === null || preg_match_all('/\[\[due:([a-f0-9-]{36})\]\]/i', $notes, $matches) === 0) {
+            return [];
         }
 
-        return strtolower($match[1]);
+        return array_map('strtolower', $matches[1]);
+    }
+
+    public static function id(?string $notes): ?string
+    {
+        return self::ids($notes)[0] ?? null;
     }
 
     public static function strip(?string $notes): ?string

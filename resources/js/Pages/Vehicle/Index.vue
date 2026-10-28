@@ -2,6 +2,10 @@
 import { Head, Link, router, useForm } from '@inertiajs/vue3'
 import { computed, ref } from 'vue'
 import AppLayout from '../../Components/AppLayout.vue'
+import DashPanel from '../../Components/DashPanel.vue'
+import OverviewTiles from '../../Components/OverviewTiles.vue'
+import type { OverviewTile } from '../../Components/OverviewTiles.vue'
+import PageHeader from '../../Components/PageHeader.vue'
 import PageHero from '../../Components/PageHero.vue'
 import Modal from '../../Components/Modal.vue'
 import { confirmDelete } from '../../lib/confirm'
@@ -107,43 +111,38 @@ function km(value: number) {
 
 const totalSpent = computed(() => props.vehicles.reduce((sum, row) => sum + row.spent, 0))
 const totalDue = computed(() => props.vehicles.reduce((sum, row) => sum + row.due_count, 0))
+
+const overview = computed<OverviewTile[]>(() => [
+    { label: 'Spend', value: pesos(totalSpent.value), icon: 'spend', wrap: 'bg-[#FDECEC] text-spend' },
+    { label: 'Due', value: String(totalDue.value), valueClass: totalDue.value > 0 ? 'text-clay' : '', icon: 'warn', wrap: 'bg-[#FFF4E5] text-gold' },
+    { label: 'Vehicles', value: String(props.vehicles.length), icon: 'vehicle', wrap: 'bg-[#E8F1FF] text-income' },
+    { label: 'Papers', value: String(props.documents.length), icon: 'bills', wrap: 'bg-[#EEEBFF] text-accent' },
+])
 </script>
 
 <template>
     <Head title="Vehicles" />
     <AppLayout>
+        <template #header>
+            <PageHeader title="Vehicles" subtitle="Garage, papers, and service spend." />
+        </template>
         <template #hero>
             <PageHero
-                eyebrow="Vehicles"
                 label="Service spend"
                 :value="pesos(totalSpent)"
-                :pill="totalDue > 0 ? `${totalDue} due` : `${vehicles.length} vehicles`"
+                :hint="totalDue > 0 ? `${totalDue} due` : `${vehicles.length} vehicles`"
             />
         </template>
-        <dl class="card stat-grid">
-            <div>
-                <dt>Spend</dt>
-                <dd class="num">{{ pesos(totalSpent) }}</dd>
+        <DashPanel title="Overview" icon="chart" icon-wrap="bg-[#EEEBFF] text-accent">
+            <div class="px-5 pb-5">
+                <OverviewTiles :tiles="overview" />
             </div>
-            <div>
-                <dt>Due</dt>
-                <dd class="num">{{ totalDue }}</dd>
-            </div>
-            <div>
-                <dt>Vehicles</dt>
-                <dd class="num">{{ vehicles.length }}</dd>
-            </div>
-            <div>
-                <dt>Papers</dt>
-                <dd class="num">{{ documents.length }}</dd>
-            </div>
-        </dl>
+        </DashPanel>
 
-        <section class="card mt-4 overflow-x-auto">
-            <div class="sheet-head">
-                <h2>Garage</h2>
+        <DashPanel class="mt-4" title="Garage" icon="vehicle" icon-wrap="bg-[#E8F1FF] text-income">
+            <template #actions>
                 <button type="button" class="btn-ghost py-1 text-xs" @click="addingVehicle = true">Add</button>
-            </div>
+            </template>
             <table class="data-table">
                 <caption class="sr-only">Vehicles</caption>
                 <thead>
@@ -175,13 +174,12 @@ const totalDue = computed(() => props.vehicles.reduce((sum, row) => sum + row.du
                     </tr>
                 </tbody>
             </table>
-        </section>
+        </DashPanel>
 
-        <section class="card mt-4 overflow-x-auto">
-            <div class="sheet-head">
-                <h2>Papers</h2>
+        <DashPanel class="mt-4" title="Papers" icon="bills" icon-wrap="bg-[#EEEBFF] text-accent">
+            <template #actions>
                 <button type="button" class="btn-ghost py-1 text-xs" @click="addingDocument = true">Add</button>
-            </div>
+            </template>
             <table class="data-table">
                 <caption class="sr-only">Licenses and papers</caption>
                 <thead>
@@ -214,7 +212,7 @@ const totalDue = computed(() => props.vehicles.reduce((sum, row) => sum + row.du
                     </tr>
                 </tbody>
             </table>
-        </section>
+        </DashPanel>
 
         <Modal v-if="addingDocument" v-model="addingDocument" title="Add document">
             <form class="grid gap-3" @submit.prevent="addDocument">

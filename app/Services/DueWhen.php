@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\Setting;
+use Carbon\CarbonImmutable;
 
 class DueWhen
 {
@@ -66,6 +67,24 @@ class DueWhen
         $bucket = $this->half($due);
 
         return $bucket === null || $bucket === $half;
+    }
+
+    /**
+     * Calendar date this bill or loan covers in a month.
+     *
+     * @param  array{mode?: string|null, day?: int|null}  $due
+     */
+    public function dateIn(int $year, int $month, array $due = []): string
+    {
+        $start = CarbonImmutable::create($year, $month, 1)->startOfDay();
+        $last = $start->endOfMonth()->day;
+        $day = match ($due['mode'] ?? null) {
+            self::EXACT => min((int) ($due['day'] ?? 15), $last),
+            self::SECOND => $last,
+            default => min(15, $last),
+        };
+
+        return $start->day($day)->toDateString();
     }
 
     public function matchesDate(?string $iso, ?int $half): bool

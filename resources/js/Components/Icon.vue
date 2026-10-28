@@ -1,12 +1,18 @@
 <script setup lang="ts">
+export type IconName =
+    | 'home' | 'log' | 'plus' | 'plan' | 'more' | 'bills' | 'loan' | 'savings'
+    | 'vehicle' | 'year' | 'people' | 'out' | 'income' | 'spend' | 'bell'
+    | 'chevron-left' | 'chevron-right' | 'close' | 'trash' | 'warn' | 'check'
+    | 'calendar' | 'chart' | 'clock' | 'house' | 'lock' | 'wallet'
+
 const props = withDefaults(defineProps<{
-    name: 'home' | 'log' | 'plus' | 'plan' | 'more' | 'bills' | 'loan' | 'savings' | 'vehicle' | 'year' | 'people' | 'out' | 'income' | 'spend' | 'bell' | 'chevron-left' | 'chevron-right' | 'close' | 'trash' | 'warn' | 'check'
+    name: IconName
     size?: number
 }>(), {
     size: 22,
 })
 
-const paths: Record<typeof props.name, string> = {
+const paths: Record<IconName, string> = {
     home: 'M4 10.5 12 4l8 6.5V20a1 1 0 0 1-1 1h-5v-6H10v6H5a1 1 0 0 1-1-1z',
     log: 'M7 4h10a2 2 0 0 1 2 2v14l-3.2-1.6L12 20l-3.8-1.6L5 20V6a2 2 0 0 1 2-2zm3 5h4M8 13h8M8 17h5',
     plus: 'M12 5v14M5 12h14',
@@ -28,6 +34,12 @@ const paths: Record<typeof props.name, string> = {
     trash: 'M9 5h6l1 2h4v2H4V7h4zm1 5v8m4-8v8M7 9l1 11h8l1-11',
     warn: 'M12 4 21 19H3zm0 6v4m0 3h.01',
     check: 'M5 12.5 9.5 17 19 7',
+    calendar: 'M7 4v2M17 4v2M5 9h14M6 6h12a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1z',
+    chart: 'M5 19V10m7 9V5m7 14v-7',
+    clock: 'M12 8v5l3 2m6-3a9 9 0 1 1-18 0 9 9 0 0 1 18 0z',
+    house: 'M4 11 12 4l8 7v9H4zM10 20v-6h4v6',
+    lock: 'M8 11V8a4 4 0 1 1 8 0v3M6 11h12v9H6z',
+    wallet: 'M4 8h16v11H4zm0 0 2.2-3h11.6L20 8M15.5 13.5H19',
 }
 </script>
 

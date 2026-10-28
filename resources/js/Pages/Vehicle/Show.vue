@@ -2,6 +2,8 @@
 import { Head, Link, router, useForm, usePage } from '@inertiajs/vue3'
 import { computed, ref, watch } from 'vue'
 import AppLayout from '../../Components/AppLayout.vue'
+import DashPanel from '../../Components/DashPanel.vue'
+import PageHeader from '../../Components/PageHeader.vue'
 import PageHero from '../../Components/PageHero.vue'
 import Modal from '../../Components/Modal.vue'
 import { confirmDelete } from '../../lib/confirm'
@@ -343,16 +345,18 @@ function removeLog(row: { ids: number[]; title: string }) {
 <template>
     <Head :title="title" />
     <AppLayout>
+        <template #header>
+            <PageHeader :title="title" subtitle="Odometer, maintenance, and service history." />
+        </template>
         <template #hero>
             <PageHero
-                :eyebrow="`Vehicles · ${vehicle.name}`"
                 label="Service spend"
                 :value="pesos(spent)"
-                :pill="`${due_count} due`"
+                :hint="`${due_count} due`"
             />
         </template>
 
-        <nav v-if="vehicles.length > 1" class="card flex flex-wrap gap-2 px-3 py-2.5" aria-label="Vehicles">
+        <nav v-if="vehicles.length > 1" class="card flex flex-wrap gap-2 px-5 py-3" aria-label="Vehicles">
             <Link
                 v-for="row in vehicles"
                 :key="row.id"
@@ -364,7 +368,7 @@ function removeLog(row: { ids: number[]; title: string }) {
             </Link>
         </nav>
 
-        <form class="card flex flex-wrap items-end gap-3 px-3 py-3" :class="vehicles.length > 1 ? 'mt-4' : ''" @submit.prevent="saveOdo">
+        <form class="card flex flex-wrap items-end gap-3 px-5 py-4" :class="vehicles.length > 1 ? 'mt-4' : ''" @submit.prevent="saveOdo">
             <label class="grid min-w-40 flex-1 gap-1">
                 <span class="kicker">Odometer</span>
                 <input v-model="odoForm.current_odometer" type="number" min="0" step="1" required class="field py-1.5">
@@ -375,14 +379,13 @@ function removeLog(row: { ids: number[]; title: string }) {
             <p class="w-full text-xs text-moss">{{ due_count }} {{ due_count === 1 ? 'item due' : 'items due' }}</p>
         </form>
 
-        <section class="card mt-4 overflow-x-auto">
-            <div class="sheet-head">
-                <h2>Maintenance</h2>
+        <DashPanel class="mt-4" title="Maintenance" icon="vehicle" icon-wrap="bg-[#E8F1FF] text-income">
+            <template #actions>
                 <div class="flex gap-2">
                     <button type="button" class="btn-ghost py-1 text-xs" :disabled="parts.length === 0" @click="logging = true">Log</button>
                     <button type="button" class="btn-ghost py-1 text-xs" @click="addingPart = true">Add part</button>
                 </div>
-            </div>
+            </template>
             <table class="data-table">
                 <caption class="sr-only">Maintenance</caption>
                 <thead>
@@ -428,12 +431,9 @@ function removeLog(row: { ids: number[]; title: string }) {
                     </tr>
                 </tbody>
             </table>
-        </section>
+        </DashPanel>
 
-        <section class="card mt-4 overflow-x-auto">
-            <div class="sheet-head">
-                <h2>History</h2>
-            </div>
+        <DashPanel class="mt-4" title="History" icon="clock" icon-wrap="bg-[#FFF4E5] text-gold">
             <table class="data-table">
                 <caption class="sr-only">Service history</caption>
                 <thead>
@@ -465,7 +465,7 @@ function removeLog(row: { ids: number[]; title: string }) {
                     </tr>
                 </tbody>
             </table>
-        </section>
+        </DashPanel>
 
         <Modal v-if="editingVehicle && vehicle" v-model="editingVehicle" title="Edit vehicle">
             <form class="grid gap-3 sm:grid-cols-2" @submit.prevent="saveVehicle">

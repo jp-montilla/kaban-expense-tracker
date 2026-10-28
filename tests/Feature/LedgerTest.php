@@ -44,8 +44,10 @@ class LedgerTest extends TestCase
                 ->where('figures.month_actual', 47619)
                 ->where('figures.cash_left', 37381)
                 ->where('figures.spending_plan', 42510)
-                ->where('figures.view_bills', 18880)
+                ->where('figures.view_bills', 10460)
+                ->where('figures.view_credit', 8420)
                 ->where('figures.view_loan', 15050)
+                ->where('cash_bills', fn ($rows) => collect($rows)->pluck('name')->all() === ['Meralco', 'Maynilad', 'Globe', 'Cursor'])
                 ->where('figures.living_plan', 17000)
                 ->where('figures.variable_plan', 17000)
                 ->where('figures.view_daily', function ($left) {
@@ -84,6 +86,7 @@ class LedgerTest extends TestCase
                 ->where('figures.income', 30000)
                 ->where('figures.cutoff_pay', 30000)
                 ->where('figures.view_bills', 1260)
+                ->where('figures.view_credit', 0)
                 ->where('figures.view_loan', 0)
                 ->where('figures.saved', 0)
                 ->where('figures.approx_savings', 11740));
@@ -95,7 +98,8 @@ class LedgerTest extends TestCase
                 ->where('figures.cutoff_pay', 55000)
                 ->where('figures.view_loan', 15050)
                 ->where('figures.saved', 0)
-                ->where('figures.view_bills', fn ($bills) => is_numeric($bills) && (float) $bills > 1260)
+                ->where('figures.view_bills', 9200)
+                ->where('figures.view_credit', 8420)
                 ->where('figures.approx_savings', fn ($left) => is_numeric($left) && (float) $left < 55000));
 
         $this->get('/summary?year=2026')
@@ -501,6 +505,7 @@ class LedgerTest extends TestCase
             ->assertInertia(fn (Assert $page) => $page
                 ->where('figures.saved', 7000)
                 ->where('figures.view_bills', 1260)
+                ->where('figures.view_credit', 0)
                 ->where('figures.view_loan', 0)
                 ->where('figures.approx_savings', 4740));
 

@@ -345,6 +345,53 @@ class Wallets
         return null;
     }
 
+    /**
+     * Every installment on this credit option due the same day.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function statementDues(string $dueId): array
+    {
+        $match = $this->findDue($dueId);
+
+        if ($match === null) {
+            return [];
+        }
+
+        $walletId = $match['wallet']['id'];
+        $dueOn = $match['due']['due_on'];
+        $dues = [];
+
+        foreach ($this->stash() as $row) {
+            if ($row['id'] !== $walletId) {
+                continue;
+            }
+
+            foreach ($row['charges'] as $charge) {
+                foreach ($charge['dues'] as $due) {
+                    if (($due['due_on'] ?? null) !== $dueOn) {
+                        continue;
+                    }
+
+                    $dues[] = $due;
+                }
+            }
+        }
+
+        return $dues;
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    public function unpaidStatementDues(string $dueId): array
+    {
+        return array_values(array_filter(
+            $this->statementDues($dueId),
+            fn (array $due): bool => ($due['paid_on'] ?? null) === null,
+        ));
+    }
+
     public function markDuePaid(string $dueId, int $transactionId, string $paidOn): void
     {
         $rows = $this->stash();
@@ -370,6 +417,47 @@ class Wallets
         }
 
         throw new InvalidArgumentException('Installment not found.');
+    }
+
+    public function markStatementPaid(string $dueId, int $transactionId, string $paidOn): float
+    {
+        $unpaid = $this->unpaidStatementDues($dueId);
+
+        if ($unpaid === []) {
+            throw new InvalidArgumentException('This installment is already paid.');
+        }
+
+        $ids = array_column($unpaid, 'id');
+        $rows = $this->stash();
+        $total = 0.0;
+        $found = 0;
+
+        foreach ($rows as $walletIndex => $row) {
+            foreach ($row['charges'] as $chargeIndex => $charge) {
+                foreach ($charge['dues'] as $dueIndex => $due) {
+                    if (! in_array($due['id'], $ids, true)) {
+                        continue;
+                    }
+
+                    if (($due['paid_on'] ?? null) !== null) {
+                        throw new InvalidArgumentException('This installment is already paid.');
+                    }
+
+                    $rows[$walletIndex]['charges'][$chargeIndex]['dues'][$dueIndex]['paid_on'] = $paidOn;
+                    $rows[$walletIndex]['charges'][$chargeIndex]['dues'][$dueIndex]['transaction_id'] = $transactionId;
+                    $total += (float) $due['amount'];
+                    $found++;
+                }
+            }
+        }
+
+        if ($found !== count($ids)) {
+            throw new InvalidArgumentException('Installment not found.');
+        }
+
+        $this->save($rows);
+
+        return round($total, 2);
     }
 
     public function updateDuePaidOn(string $dueId, string $paidOn): void
@@ -400,23 +488,32 @@ class Wallets
 
     public function unpayDue(string $dueId): void
     {
+        $match = $this->findDue($dueId);
+
+        if ($match === null) {
+            return;
+        }
+
+        $transactionId = $match['due']['transaction_id'] ?? null;
         $rows = $this->stash();
 
         foreach ($rows as $walletIndex => $row) {
             foreach ($row['charges'] as $chargeIndex => $charge) {
                 foreach ($charge['dues'] as $dueIndex => $due) {
-                    if ($due['id'] !== $dueId) {
+                    $sameDue = $due['id'] === $dueId;
+                    $samePayment = $transactionId !== null && ($due['transaction_id'] ?? null) === $transactionId;
+
+                    if (! $sameDue && ! $samePayment) {
                         continue;
                     }
 
                     $rows[$walletIndex]['charges'][$chargeIndex]['dues'][$dueIndex]['paid_on'] = null;
                     $rows[$walletIndex]['charges'][$chargeIndex]['dues'][$dueIndex]['transaction_id'] = null;
-                    $this->save($rows);
-
-                    return;
                 }
             }
         }
+
+        $this->save($rows);
     }
 
     /**
