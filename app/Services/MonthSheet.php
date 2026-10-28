@@ -5,7 +5,7 @@ namespace App\Services;
 use App\Models\Category;
 use App\Models\Debt;
 use App\Models\DebtPayment;
-use App\Models\Setting;
+use App\Models\SavingsEntry;
 use App\Models\Transaction;
 use App\Support\Money;
 use App\Support\Period;
@@ -15,7 +15,11 @@ use Illuminate\Support\Str;
 
 class MonthSheet
 {
-    public function __construct(private Wallets $wallets, private DueWhen $dueWhen) {}
+    public function __construct(
+        private Wallets $wallets,
+        private DueWhen $dueWhen,
+        private LivingPlan $livingPlan,
+    ) {}
 
     /**
      * @return Collection<int, array<string, mixed>>
@@ -217,8 +221,135 @@ class MonthSheet
         return [
             'bills' => round($this->cashBillsForPeriod($period) + $credit, 2),
             'loan' => $loan,
-            'living' => Money::pesos(Money::cents(auth()->user()?->living_plan ?? Setting::getValue(Setting::LIVING_PLAN, '17000'))),
+            'living' => $this->livingPlan->for($period->year, $period->month),
         ];
+    }
+
+    /**
+     * 31st pay covers living plus Cursor. 15th pay covers remaining bills, credit, and loans.
+     * Savings already logged on a paycheck come out of that paycheck's leftover.
+     * The last calendar day belongs to next month's 31st pay, not this month's 15th.
+     *
+     * @return array{
+     *     living: float,
+     *     first: array{pay: float, bills: list<array{name: string, amount: float}>, bills_total: float, saved: float, leftover: float},
+     *     second: array{pay: float, bills: list<array{name: string, amount: float}>, bills_total: float, loans: float, saved: float, leftover: float},
+     *     saved: float,
+     *     approx_savings: float
+     * }
+     */
+    public function funding(Period $period, ?float $firstPay = null, ?float $secondPay = null): array
+    {
+        $month = Period::month($period->year, $period->month);
+        $living = $this->livingPlan->for($month->year, $month->month);
+        $cash = $this->cashBillRows($month);
+        $credit = $this->computedBills($month)
+            ->filter(fn (array $bill): bool => (float) $bill['plan'] > 0)
+            ->map(fn (array $bill): array => [
+                'name' => $bill['name'],
+                'amount' => round((float) $bill['plan'], 2),
+            ])
+            ->values();
+        $firstBills = $cash
+            ->filter(fn (array $row): bool => $row['first_pay'])
+            ->map(fn (array $row): array => ['name' => $row['name'], 'amount' => $row['amount']])
+            ->values();
+        $secondBills = $cash
+            ->reject(fn (array $row): bool => $row['first_pay'])
+            ->map(fn (array $row): array => ['name' => $row['name'], 'amount' => $row['amount']])
+            ->concat($credit)
+            ->values();
+        $loans = round((float) $this->loans($month)
+            ->filter(fn (array $loan): bool => $loan['due_this_period'])
+            ->sum(fn (array $loan): float => $loan['paid_this_period']
+                ? (float) $loan['spent_this_period']
+                : (float) ($loan['installment_amount'] ?? 0)), 2);
+        $firstTotal = round((float) $firstBills->sum('amount'), 2);
+        $secondTotal = round((float) $secondBills->sum('amount'), 2);
+        $firstPay = round((float) ($firstPay ?? 0), 2);
+        $secondPay = round((float) ($secondPay ?? 0), 2);
+        $monthStart = CarbonImmutable::create($month->year, $month->month, 1)->startOfDay();
+        $firstOn = $monthStart->subDay();
+        $secondOn = $monthStart->day(15);
+        $nextFirstOn = $monthStart->endOfMonth()->startOfDay();
+        $firstSaved = $this->paySavings($firstOn, $secondOn);
+        $secondSaved = $this->paySavings($secondOn, $nextFirstOn);
+        $firstLeft = round($firstPay - $living - $firstTotal - $firstSaved, 2);
+        $secondLeft = round($secondPay - $secondTotal - $loans - $secondSaved, 2);
+
+        return [
+            'living' => $living,
+            'first' => [
+                'pay' => $firstPay,
+                'bills' => $firstBills->all(),
+                'bills_total' => $firstTotal,
+                'saved' => $firstSaved,
+                'leftover' => $firstLeft,
+            ],
+            'second' => [
+                'pay' => $secondPay,
+                'bills' => $secondBills->all(),
+                'bills_total' => $secondTotal,
+                'loans' => $loans,
+                'saved' => $secondSaved,
+                'leftover' => $secondLeft,
+            ],
+            'saved' => round($firstSaved + $secondSaved, 2),
+            'approx_savings' => round($firstLeft + $secondLeft, 2),
+        ];
+    }
+
+    /**
+     * Dashboard tiles for a paycheck. 1–15 is the 31st pay (living + Cursor);
+     * 16–end is the 15th pay (remaining bills + loans).
+     *
+     * @param  array{
+     *     first: array{bills_total: float, saved: float, leftover: float},
+     *     second: array{bills_total: float, loans: float, saved: float, leftover: float},
+     *     saved: float,
+     *     approx_savings: float
+     * }  $funding
+     * @return array{bills: float, loan: float, saved: float, leftover: float}
+     */
+    public function payTiles(array $funding, ?int $half): array
+    {
+        return match ($half) {
+            1 => [
+                'bills' => $funding['first']['bills_total'],
+                'loan' => 0.0,
+                'saved' => $funding['first']['saved'],
+                'leftover' => $funding['first']['leftover'],
+            ],
+            2 => [
+                'bills' => $funding['second']['bills_total'],
+                'loan' => $funding['second']['loans'],
+                'saved' => $funding['second']['saved'],
+                'leftover' => $funding['second']['leftover'],
+            ],
+            default => [
+                'bills' => round($funding['first']['bills_total'] + $funding['second']['bills_total'], 2),
+                'loan' => $funding['second']['loans'],
+                'saved' => $funding['saved'],
+                'leftover' => $funding['approx_savings'],
+            ],
+        };
+    }
+
+    /**
+     * Savings from $from inclusive through the day before $until.
+     */
+    private function paySavings(CarbonImmutable $from, CarbonImmutable $until): float
+    {
+        $to = $until->subDay();
+
+        if ($to->lt($from)) {
+            return 0.0;
+        }
+
+        return Money::pesos((int) SavingsEntry::query()
+            ->whereBetween('occurred_on', [$from->toDateString(), $to->toDateString()])
+            ->get()
+            ->sum(fn (SavingsEntry $entry): int => $entry->towardCashLeftCents()));
     }
 
     /**
@@ -226,12 +357,26 @@ class MonthSheet
      */
     private function cashBillsForPeriod(Period $period): float
     {
+        return round((float) $this->cashBillRows($period)
+            ->filter(fn (array $row): bool => $this->dueWhen->matchesHalf(
+                $this->dueWhen->for('bills', $row['id']),
+                $period->half,
+            ))
+            ->sum('amount'), 2);
+    }
+
+    /**
+     * @return Collection<int, array{id: int, name: string, slug: string, amount: float, first_pay: bool}>
+     */
+    private function cashBillRows(Period $period): Collection
+    {
         $bills = Category::query()
             ->where('kind', 'bill')
             ->where('is_active', true)
+            ->orderBy('sort_order')
+            ->orderBy('name')
             ->get()
             ->reject(fn (Category $bill): bool => $this->wallets->isCreditAccount($bill->slug, $bill->name))
-            ->filter(fn (Category $bill): bool => $this->dueWhen->matchesHalf($this->dueWhen->for('bills', $bill->id), $period->half))
             ->values();
         $spentByCategory = $bills->isEmpty()
             ? collect()
@@ -246,12 +391,23 @@ class MonthSheet
                     fn (Transaction $row): float => $row->direction === 'in' ? -(float) $row->amount : (float) $row->amount,
                 ), 2));
 
-        return round((float) $bills->sum(function (Category $bill) use ($spentByCategory): float {
+        return $bills->map(function (Category $bill) use ($spentByCategory): array {
             $plan = (float) $bill->monthly_plan;
             $spent = (float) ($spentByCategory->get($bill->id) ?? $spentByCategory->get((string) $bill->id) ?? 0);
 
-            return $plan > 0 && $spent > 0 ? $spent : $plan;
-        }), 2);
+            return [
+                'id' => $bill->id,
+                'name' => $bill->name,
+                'slug' => $bill->slug,
+                'amount' => round($plan > 0 && $spent > 0 ? $spent : $plan, 2),
+                'first_pay' => $this->isFirstPayBill($bill),
+            ];
+        })->values();
+    }
+
+    private function isFirstPayBill(Category $bill): bool
+    {
+        return strtolower($bill->slug) === 'cursor' || strtolower($bill->name) === 'cursor';
     }
 
     /**

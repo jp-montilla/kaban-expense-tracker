@@ -17,13 +17,20 @@ class DashboardController extends Controller
         $period = Period::fromRequest($request);
         $overview = $ledger->overview($period->year, $period->month, $period->half, $period);
         $dues = $sheet->dues($period);
-        $planned = $sheet->plannedStats($period, $dues);
-        $overview['figures']['view_bills'] = $planned['bills'];
-        $overview['figures']['view_loan'] = $planned['loan'];
-        $overview['figures']['view_daily'] = $planned['living'];
+        $funding = $sheet->funding(
+            $period,
+            $overview['figures']['first_cutoff'],
+            $overview['figures']['second_cutoff'],
+        );
+        $tiles = $sheet->payTiles($funding, $period->half);
+        $overview['figures']['view_bills'] = $tiles['bills'];
+        $overview['figures']['view_loan'] = $tiles['loan'];
+        $overview['figures']['saved'] = $tiles['saved'];
+        $overview['figures']['approx_savings'] = $tiles['leftover'];
 
         return Inertia::render('Dashboard', [
             ...$overview,
+            'funding' => $funding,
             'dues' => $dues,
             'debts' => $sheet->loans($period),
             'logCategories' => Category::query()

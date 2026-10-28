@@ -3,7 +3,6 @@ import { Head, router, useForm, usePage } from '@inertiajs/vue3'
 import { computed, ref } from 'vue'
 import AppLayout from '../../Components/AppLayout.vue'
 import PageHero from '../../Components/PageHero.vue'
-import BusyOverlay from '../../Components/BusyOverlay.vue'
 import Modal from '../../Components/Modal.vue'
 import PeriodPicker from '../../Components/PeriodPicker.vue'
 import type { PeriodValue } from '../../Components/PeriodPicker.vue'
@@ -55,7 +54,6 @@ const editForm = useForm({
     notes: '',
 })
 
-const busy = computed(() => form.processing || editForm.processing)
 const viewingAll = computed(() => props.period.span === 'all')
 
 function openAdd() {
@@ -134,7 +132,6 @@ function kindLabel(entry: Entry) {
                 :pill="viewingAll ? `${entries.length} entries` : `This period ${pesos(month_saved)}`"
             />
         </template>
-        <BusyOverlay :show="busy" label="Saving…" />
         <dl class="card stat-grid">
             <div>
                 <dt>{{ viewingAll ? 'Put in' : 'This period' }}</dt>

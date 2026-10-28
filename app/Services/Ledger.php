@@ -43,6 +43,7 @@ class Ledger
         $latestSalary = $salaries->last();
         $scale = $this->planScale($period);
         $plans = $this->plans($categories, $scale, $year, $month);
+        $livingPlan = app(LivingPlan::class);
 
         $trend = [];
 
@@ -73,9 +74,10 @@ class Ledger
         $monthTotals = $this->totals($monthTransactions);
         $viewSaved = $this->savingsTowardCashLeft($this->savingsInRange($savings, $start, $end));
         $income = $this->resolvePeriodIncome($salaries, $bonuses, $period);
-        $variableSpent = $this->variableSpent($viewTransactions);
-        $variableLeft = $plans['variable'] - $variableSpent;
-        $daysLeft = $period->daysLeft();
+        $livingCents = $livingPlan->cents($year, $month);
+        $variableSpent = $this->variableSpent($monthTransactions);
+        $variableLeft = $livingCents - $variableSpent;
+        $daysLeft = Cutoff::daysLeft($year, $month);
 
         return [
             'period' => [
@@ -98,7 +100,9 @@ class Ledger
                 'latest_since' => $latestSalary?->effective_on->toDateString(),
                 'view_bills' => Money::pesos($viewTotals['bills']),
                 'view_loan' => Money::pesos($viewTotals['loan']),
-                'view_daily' => Money::pesos($viewTotals['daily']),
+                'view_daily' => Money::pesos($variableLeft),
+                'living_plan' => Money::pesos($livingCents),
+                'living_spent' => Money::pesos($variableSpent),
                 'view_actual' => Money::pesos($viewTotals['actual']),
                 'view_savings' => Money::pesos($viewSaved),
                 'month_spent' => Money::pesos($monthTotals['spent']),
@@ -106,7 +110,7 @@ class Ledger
                 'cash_left' => $income['cents'] === null ? null : Money::pesos($income['cents'] - $viewTotals['actual'] - $viewSaved),
                 'spending_plan' => Money::pesos($plans['spending']),
                 'plan_left' => Money::pesos($plans['spending'] - $monthTotals['spent']),
-                'variable_plan' => Money::pesos($plans['variable']),
+                'variable_plan' => Money::pesos($livingCents),
                 'variable_spent' => Money::pesos($variableSpent),
                 'variable_left' => Money::pesos($variableLeft),
                 'daily_budget' => $daysLeft > 0 ? Money::pesos((int) round($variableLeft / $daysLeft)) : null,
@@ -272,7 +276,7 @@ class Ledger
      */
     private function plans(Collection $categories, int $scale = 1, int $year = 2026, int $month = 1): array
     {
-        $living = Money::cents(auth()->user()?->living_plan ?? Setting::getValue(Setting::LIVING_PLAN, '17000')) * $scale;
+        $living = app(LivingPlan::class)->cents($year, $month);
         $committed = 0;
         $wallets = app(Wallets::class);
 

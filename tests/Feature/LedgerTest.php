@@ -44,13 +44,31 @@ class LedgerTest extends TestCase
                 ->where('figures.month_actual', 47619)
                 ->where('figures.cash_left', 37381)
                 ->where('figures.spending_plan', 42510)
-                ->where('figures.view_bills', 10460)
+                ->where('figures.view_bills', 18880)
                 ->where('figures.view_loan', 15050)
-                ->where('figures.view_daily', 17000)
+                ->where('figures.living_plan', 17000)
+                ->where('figures.variable_plan', 17000)
+                ->where('figures.view_daily', function ($left) {
+                    return is_numeric($left);
+                })
+                ->where('figures', function ($figures) {
+                    $plan = (float) $figures['living_plan'];
+                    $spent = (float) $figures['living_spent'];
+                    $left = (float) $figures['view_daily'];
+
+                    return $plan === 17000.0
+                        && $spent > 0
+                        && abs($left - ($plan - $spent)) < 0.011;
+                })
+                ->where('funding.first.bills', fn ($rows) => collect($rows)->pluck('name')->all() === ['Cursor'])
+                ->where('funding.second.loans', 15050)
+                ->where('funding.saved', 0)
+                ->where('funding.first.saved', 0)
+                ->where('funding.second.saved', 0)
+                ->where('figures.saved', 0)
                 ->where('figures.view_savings', 0)
                 ->where('figures.savings_balance', 44000)
                 ->where('period.days_left', 10)
-                ->where('figures.variable_plan', 17000)
                 ->where('logCategories', function ($rows) {
                     $rows = collect($rows);
 
@@ -64,13 +82,21 @@ class LedgerTest extends TestCase
             ->assertOk()
             ->assertInertia(fn (Assert $page) => $page
                 ->where('figures.income', 30000)
-                ->where('figures.cutoff_pay', 30000));
+                ->where('figures.cutoff_pay', 30000)
+                ->where('figures.view_bills', 1260)
+                ->where('figures.view_loan', 0)
+                ->where('figures.saved', 0)
+                ->where('figures.approx_savings', 11740));
 
         $this->get('/?year=2026&month=10&half=2')
             ->assertOk()
             ->assertInertia(fn (Assert $page) => $page
                 ->where('figures.income', 55000)
-                ->where('figures.cutoff_pay', 55000));
+                ->where('figures.cutoff_pay', 55000)
+                ->where('figures.view_loan', 15050)
+                ->where('figures.saved', 0)
+                ->where('figures.view_bills', fn ($bills) => is_numeric($bills) && (float) $bills > 1260)
+                ->where('figures.approx_savings', fn ($left) => is_numeric($left) && (float) $left < 55000));
 
         $this->get('/summary?year=2026')
             ->assertOk()
@@ -86,7 +112,7 @@ class LedgerTest extends TestCase
                 ->where('figures.second_cutoff', 55000)
                 ->where('figures.pay_mode', 'cutoff')
                 ->where('figures.spending_plan', 42510)
-                ->where('figures.view_bills', 10460)
+                ->where('figures.view_bills', fn ($bills) => is_numeric($bills) && (float) $bills > 1260)
                 ->where('figures.view_loan', 15050)
                 ->where('figures.view_daily', 17000)
                 ->where('figures.cash_left', 110000));
@@ -101,9 +127,11 @@ class LedgerTest extends TestCase
                 ->where('first_cutoff', 30000)
                 ->where('second_cutoff', 55000)
                 ->where('pay_mode', 'cutoff')
-                ->where('spending_plan', 42510)
+                ->where('spending_plan', 50930)
                 ->where('living_plan', 17000)
-                ->where('left_if_followed', 42490)
+                ->where('left_if_followed', 34070)
+                ->has('funding')
+                ->where('funding.first.bills', fn ($rows) => collect($rows)->pluck('name')->all() === ['Cursor'])
                 ->has('salaries', 3)
                 ->has('bills')
                 ->has('wallets'));
@@ -398,6 +426,96 @@ class LedgerTest extends TestCase
         $this->assertNull($personal->installment_count);
         $this->assertNull($personal->installment_amount);
         $this->assertSame('5000.00', $personal->principal);
+    }
+
+    public function test_living_budget_history_keeps_earlier_months(): void
+    {
+        $this->travelTo('2026-10-22');
+        $this->seed(LedgerSeeder::class);
+        $this->actingAs(User::owner());
+
+        $this->put('/budget', [
+            'living_plan' => 20000,
+            'budget_cycle' => 'month',
+        ])->assertRedirect();
+
+        $this->get('/?year=2026&month=10')
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('figures.living_plan', 20000));
+
+        $this->get('/?year=2026&month=9')
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('figures.living_plan', 17000));
+    }
+
+    public function test_cutoff_savings_come_out_of_paycheck_leftover(): void
+    {
+        $this->travelTo('2026-10-22');
+        $this->seed(LedgerSeeder::class);
+        $this->actingAs(User::owner());
+
+        $this->post('/savings', [
+            'occurred_on' => '2026-09-30',
+            'amount' => 5000,
+            'notes' => 'First cutoff',
+        ])->assertRedirect();
+
+        $this->post('/savings', [
+            'occurred_on' => '2026-10-01',
+            'amount' => 2000,
+            'notes' => 'Still first cutoff',
+        ])->assertRedirect();
+
+        $this->post('/savings', [
+            'occurred_on' => '2026-10-15',
+            'amount' => 8000,
+            'notes' => 'Second cutoff',
+        ])->assertRedirect();
+
+        $this->post('/savings', [
+            'occurred_on' => '2026-10-31',
+            'amount' => 1000,
+            'notes' => 'Next month first pay',
+        ])->assertRedirect();
+
+        $this->get('/?year=2026&month=10')
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('funding.first.saved', 7000)
+                ->where('funding.second.saved', 8000)
+                ->where('funding.saved', 15000)
+                ->where('figures.saved', 15000)
+                ->where('funding.first.leftover', 4740)
+                ->where('funding', function ($funding) {
+                    $first = (float) $funding['first']['leftover'];
+                    $second = (float) $funding['second']['leftover'];
+
+                    return abs(((float) $funding['approx_savings']) - ($first + $second)) < 0.011
+                        && $second < 23084.89;
+                }));
+
+        $this->get('/?year=2026&month=10&half=1')
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('figures.saved', 7000)
+                ->where('figures.view_bills', 1260)
+                ->where('figures.view_loan', 0)
+                ->where('figures.approx_savings', 4740));
+
+        $this->get('/?year=2026&month=10&half=2')
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('figures.saved', 8000)
+                ->where('figures.view_loan', 15050)
+                ->where('figures.approx_savings', fn ($left) => is_numeric($left) && (float) $left !== 4740.0));
+
+        $this->get('/?year=2026&month=11')
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('funding.first.saved', 1000)
+                ->where('funding.second.saved', 0));
     }
 
     public function test_dashboard_lists_the_priciest_living_lines(): void

@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { useForm, usePage } from '@inertiajs/vue3'
 import { computed, watch } from 'vue'
-import BusyOverlay from './BusyOverlay.vue'
 import CreditTerms from './CreditTerms.vue'
 import { pesos } from '../lib/money'
 import type { CreditOption } from '../lib/wallets'
@@ -146,7 +145,6 @@ function itemError(index: number): string | undefined {
 
 <template>
     <form class="grid gap-3" @submit.prevent="submit">
-        <BusyOverlay :show="form.processing" :label="editing ? 'Updating…' : 'Saving…'" />
         <label class="grid gap-1">
             <span class="kicker">Date</span>
             <input v-model="form.occurred_on" type="date" required class="field" :disabled="editing">

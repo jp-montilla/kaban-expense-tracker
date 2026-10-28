@@ -3,7 +3,6 @@ import { Head, Link, useForm } from '@inertiajs/vue3'
 import { computed, ref } from 'vue'
 import AppLayout from '../../Components/AppLayout.vue'
 import PageHero from '../../Components/PageHero.vue'
-import BusyOverlay from '../../Components/BusyOverlay.vue'
 import CreditTerms from '../../Components/CreditTerms.vue'
 import Modal from '../../Components/Modal.vue'
 import PaySourceSelect from '../../Components/PaySourceSelect.vue'
@@ -192,7 +191,6 @@ const page = useForm({
     credit_monthly: '',
 })
 
-const busy = computed(() => page.processing)
 const payWallets = computed(() => props.pay_sources)
 const editingPay = computed(() => paying.value?.paymentId != null)
 const payOpen = computed({
@@ -403,7 +401,6 @@ function halfHref(half?: number) {
                 </div>
             </PageHero>
         </template>
-        <BusyOverlay :show="busy" :label="editingPay ? 'Updating payment…' : 'Recording payment…'" />
         <dl class="card stat-grid stat-grid-3">
             <div>
                 <dt>Bills</dt>

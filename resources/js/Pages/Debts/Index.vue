@@ -404,7 +404,7 @@ function terms(debt: DebtItem) {
                     <textarea v-model="editorFor(editing).notes" rows="2" class="field" />
                 </label>
                 <div class="sm:col-span-2">
-                    <button class="btn">Save</button>
+                    <button class="btn" :disabled="editorFor(editing).processing">Save</button>
                 </div>
             </form>
         </Modal>

@@ -10,19 +10,20 @@ use App\Models\Salary;
 use App\Models\Setting;
 use App\Services\DueWhen;
 use App\Services\Ledger;
+use App\Services\LivingPlan;
+use App\Services\MonthSheet;
 use App\Services\Wallets;
 use App\Support\Cutoff;
 use App\Support\Money;
-use App\Support\Ownership;
+use App\Support\Period;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\RedirectResponse;
-use Illuminate\Http\Request;
 use Inertia\Inertia;
 use Inertia\Response;
 
 class BudgetController extends Controller
 {
-    public function edit(Request $request, Ledger $ledger, Wallets $wallets, DueWhen $dueWhen): Response
+    public function edit(Ledger $ledger, Wallets $wallets, DueWhen $dueWhen, LivingPlan $livingPlan, MonthSheet $sheet): Response
     {
         $monthStart = CarbonImmutable::today()->startOfMonth();
         $year = $monthStart->year;
@@ -59,21 +60,16 @@ class BudgetController extends Controller
             ->get()
             ->map(fn (Debt $debt): array => $debt->toSummaryArray())
             ->values();
-        $billPlan = (float) $bills->sum(fn (Category $bill): float => (float) $bill->monthly_plan);
-        $creditPlan = Money::pesos($wallets->unpaidDueCentsForMonth($year, $month));
-        $loanPlan = (float) $loans->sum(fn (array $loan): float => (float) ($loan['is_monthly'] ? ($loan['installment_amount'] ?? 0) : 0));
-        $living = (float) ($request->user()->living_plan ?? 0);
-
-        if ($living <= 0) {
-            $living = (float) (Setting::query()->where('key', Setting::LIVING_PLAN)->value('value') ?? 17000);
-        }
-
+        $living = $livingPlan->for($year, $month);
         $budgetCycle = Setting::getValue(Setting::BUDGET_CYCLE, 'month') === 'cutoff' ? 'cutoff' : 'month';
-        $scale = $budgetCycle === 'cutoff' ? 2 : 1;
-        $billPlanView = round(($billPlan * $scale) + $creditPlan, 2);
-        $loanPlanView = round($loanPlan * $scale, 2);
-        $livingView = round($living * $scale, 2);
-        $spending = $billPlanView + $loanPlanView + $livingView;
+        $funding = $sheet->funding(Period::month($year, $month), $firstPay, $secondPay);
+        $billPlanView = round($funding['first']['bills_total'] + $funding['second']['bills_total'], 2);
+        $loanPlanView = $funding['second']['loans'];
+        $livingView = $funding['living'];
+        $spending = round($billPlanView + $loanPlanView + $livingView, 2);
+        $livingFrom = collect($livingPlan->all())
+            ->reverse()
+            ->first(fn (array $row): bool => $row['effective_on'] <= $monthStart->toDateString());
 
         return Inertia::render('Budget/Edit', [
             'budget_month' => $monthStart->format('F Y'),
@@ -93,10 +89,14 @@ class BudgetController extends Controller
             'latest_income' => $latest ? (float) $latest->amount : null,
             'latest_since' => $latest?->effective_on->toDateString(),
             'living_plan' => $living,
+            'living_from' => $livingFrom
+                ? CarbonImmutable::parse($livingFrom['effective_on'])->format('F Y')
+                : $monthStart->format('F Y'),
+            'funding' => $funding,
             'bill_plan' => $billPlanView,
             'loan_plan' => $loanPlanView,
-            'spending_plan' => round($spending, 2),
-            'left_if_followed' => round($monthPay - $spending, 2),
+            'spending_plan' => $spending,
+            'left_if_followed' => $funding['approx_savings'],
             'salaries' => $salaries->map(fn (Salary $salary): array => $salary->toListItem())->values(),
             'bonuses' => Bonus::query()->orderByDesc('received_on')->orderByDesc('id')->get()->map(fn (Bonus $bonus): array => $bonus->toListItem())->values(),
             'bills' => $bills->map(function (Category $bill) use ($dueWhen): array {
@@ -127,7 +127,7 @@ class BudgetController extends Controller
         ]);
     }
 
-    public function update(BudgetRequest $request): RedirectResponse
+    public function update(BudgetRequest $request, LivingPlan $livingPlan): RedirectResponse
     {
         $data = $request->validated();
 
@@ -135,11 +135,7 @@ class BudgetController extends Controller
             Setting::putValue(Setting::BUDGET_CYCLE, $data['budget_cycle']);
         }
 
-        if (Ownership::hasLivingPlan()) {
-            $request->user()->update(['living_plan' => $data['living_plan']]);
-        } else {
-            Setting::putValue(Setting::LIVING_PLAN, (string) $data['living_plan']);
-        }
+        $livingPlan->put((float) $data['living_plan'], CarbonImmutable::today()->startOfMonth());
 
         return redirect()
             ->route('budget.edit')

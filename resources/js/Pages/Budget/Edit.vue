@@ -70,6 +70,14 @@ const props = defineProps<{
     budget_cycle: 'month' | 'cutoff'
     wallets: WalletRow[]
     living_plan: number
+    living_from: string
+    funding: {
+        living: number
+        first: { pay: number, bills: Array<{ name: string, amount: number }>, bills_total: number, saved: number, leftover: number }
+        second: { pay: number, bills: Array<{ name: string, amount: number }>, bills_total: number, loans: number, saved: number, leftover: number }
+        saved: number
+        approx_savings: number
+    }
     bill_plan: number
     loan_plan: number
     spending_plan: number
@@ -140,15 +148,7 @@ const editingWallet = ref<WalletRow | null>(null)
 const removing = ref(false)
 const optionGroups = computed(() => groupedWallets(props.wallets))
 
-const busy = computed(() => (
-    livingForm.processing
-    || salaryForm.processing
-    || bonusForm.processing
-    || billForm.processing
-    || walletForm.processing
-    || passwordForm.processing
-    || removing.value
-))
+const busy = computed(() => livingForm.processing || removing.value)
 
 const payNote = computed(() => {
     if (props.pay_mode === 'month') {
@@ -469,22 +469,30 @@ function savePassword() {
         <template #hero>
             <PageHero
                 :eyebrow="`Plan · ${budget_month}`"
-                label="Left if followed"
-                :value="pesos(left_if_followed)"
+                label="Left"
+                :value="pesos(funding.approx_savings)"
                 :pill="`Month budget ${pesos(month_pay)}`"
             >
                 <div v-if="pay_mode !== 'month'" class="hero-split">
                     <div>
                         <p class="text-xs text-white/70">{{ previous_pay_label }}</p>
                         <p class="num mt-1 text-lg text-white">{{ pesos(first_cutoff) }}</p>
+                        <p v-if="funding.first.saved" class="mt-1 text-xs text-white/70">saved {{ pesos(funding.first.saved) }}</p>
+                        <p class="mt-1 text-xs text-white/70">left {{ pesos(funding.first.leftover) }}</p>
                     </div>
                     <p class="self-center text-white/40">+</p>
                     <div>
                         <p class="text-xs text-white/70">{{ current_pay_label }}</p>
                         <p class="num mt-1 text-lg text-white">{{ pesos(second_cutoff) }}</p>
+                        <p v-if="funding.second.saved" class="mt-1 text-xs text-white/70">saved {{ pesos(funding.second.saved) }}</p>
+                        <p class="mt-1 text-xs text-white/70">left {{ pesos(funding.second.leftover) }}</p>
                     </div>
                 </div>
-                <p v-else class="mx-auto mt-4 max-w-md text-center text-sm text-white/90">{{ payNote }}</p>
+                <p class="mx-auto mt-4 w-fit text-sm text-white/90">
+                    Saved {{ pesos(funding.saved) }}
+                    <span class="text-white/70"> · left {{ pesos(funding.approx_savings) }}</span>
+                </p>
+                <p v-if="pay_mode === 'month'" class="mx-auto mt-2 max-w-md text-center text-sm text-white/90">{{ payNote }}</p>
             </PageHero>
         </template>
 
@@ -504,10 +512,44 @@ function savePassword() {
                 <dd class="num">{{ pesos(living_plan) }}</dd>
             </div>
             <div>
-                <dt>Left</dt>
-                <dd class="num" :class="left_if_followed < 0 ? 'text-clay' : 'text-palm-deep'">{{ pesos(left_if_followed) }}</dd>
+                <dt>Saved</dt>
+                <dd class="num" :class="funding.saved < 0 ? 'text-clay' : 'text-palm-deep'">{{ pesos(funding.saved) }}</dd>
+                <p class="mt-1 text-xs text-moss">left {{ pesos(funding.approx_savings) }}</p>
             </div>
         </dl>
+
+        <section class="card mt-4 overflow-hidden">
+            <div class="sheet-head">
+                <h2>From each paycheck</h2>
+            </div>
+            <div class="grid gap-px bg-line sm:grid-cols-2">
+                <div class="bg-paper px-3 py-3">
+                    <p class="kicker">{{ previous_pay_label }}</p>
+                    <p class="num mt-1 text-lg">{{ pesos(first_cutoff) }}</p>
+                    <p class="mt-2 text-sm text-moss">Living {{ pesos(funding.living) }}</p>
+                    <p v-for="bill in funding.first.bills" :key="'first-'+bill.name" class="text-sm text-moss">
+                        {{ bill.name }} {{ pesos(bill.amount) }}
+                    </p>
+                    <p v-if="funding.first.saved" class="text-sm text-moss">Saved {{ pesos(funding.first.saved) }}</p>
+                    <p class="mt-2 text-sm font-medium" :class="funding.first.leftover < 0 ? 'text-clay' : 'text-palm-deep'">
+                        Left {{ pesos(funding.first.leftover) }}
+                    </p>
+                </div>
+                <div class="bg-paper px-3 py-3">
+                    <p class="kicker">{{ current_pay_label }}</p>
+                    <p class="num mt-1 text-lg">{{ pesos(second_cutoff) }}</p>
+                    <p v-for="bill in funding.second.bills" :key="'second-'+bill.name" class="mt-2 text-sm text-moss first:mt-2">
+                        {{ bill.name }} {{ pesos(bill.amount) }}
+                    </p>
+                    <p v-if="funding.second.bills.length === 0" class="mt-2 text-sm text-moss">No other bills</p>
+                    <p class="text-sm text-moss">Loans {{ pesos(funding.second.loans) }}</p>
+                    <p v-if="funding.second.saved" class="text-sm text-moss">Saved {{ pesos(funding.second.saved) }}</p>
+                    <p class="mt-2 text-sm font-medium" :class="funding.second.leftover < 0 ? 'text-clay' : 'text-palm-deep'">
+                        Left {{ pesos(funding.second.leftover) }}
+                    </p>
+                </div>
+            </div>
+        </section>
 
         <section class="card mt-4 overflow-x-auto">
             <div class="sheet-head">
@@ -649,6 +691,7 @@ function savePassword() {
             <label class="grid min-w-40 flex-1 gap-1">
                 <span class="kicker">Living budget</span>
                 <input v-model="livingForm.living_plan" type="number" min="0" step="0.01" required class="field py-1.5">
+                <span class="text-xs text-moss">Whole month, taken from the {{ previous_pay_label }} pay with Cursor. Remaining bills and loans come from the {{ current_pay_label }} pay. Applies from {{ living_from }}; earlier months keep their own amount.</span>
             </label>
             <label class="grid gap-1">
                 <span class="kicker">Budget by</span>

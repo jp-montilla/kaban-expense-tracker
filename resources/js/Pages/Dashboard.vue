@@ -19,8 +19,12 @@ interface FigureSet {
     view_bills: number
     view_loan: number
     view_daily: number
+    living_plan: number
+    living_spent: number
     view_actual: number
     view_savings: number
+    saved: number
+    approx_savings: number
     month_spent: number
     month_actual: number
     cash_left: number | null
@@ -66,6 +70,20 @@ interface TopLiving {
     occurred_on: string
 }
 
+interface FundingBill {
+    name: string
+    amount: number
+}
+
+interface FundingSplit {
+    pay: number
+    bills: FundingBill[]
+    bills_total: number
+    saved: number
+    leftover: number
+    loans?: number
+}
+
 interface DueRow {
     id: string
     name: string
@@ -93,6 +111,13 @@ const props = defineProps<{
     period: PeriodValue & { days_left: number; days_in_month: number; month_label?: string }
     figures: FigureSet
     dues: DueRow[]
+    funding: {
+        living: number
+        first: FundingSplit
+        second: FundingSplit
+        saved: number
+        approx_savings: number
+    }
     trend: TrendPoint[]
     recent: Array<{ id: number; occurred_on: string; description: string; amount: number; direction: 'out' | 'in'; category: string | null }>
     debts: DebtCard[]
@@ -160,16 +185,24 @@ const donutTotal = computed(() => topList.value.reduce((sum, row) => sum + Math.
                 :pill="cashHint"
             >
                 <div v-if="figures.first_cutoff != null && figures.second_cutoff != null" class="hero-split">
-                    <div>
+                    <div v-if="period.half !== 2">
                         <p class="text-xs text-white/70">{{ monthPayDay(0) }}</p>
                         <p class="num mt-1 text-lg text-white">{{ pesos(figures.first_cutoff) }}</p>
+                        <p v-if="funding.first.saved" class="mt-1 text-xs text-white/70">saved {{ pesos(funding.first.saved) }}</p>
+                        <p class="mt-1 text-xs text-white/70">left {{ pesos(funding.first.leftover) }}</p>
                     </div>
-                    <p class="self-center text-white/40">+</p>
-                    <div>
+                    <p v-if="period.half === null" class="self-center text-white/40">+</p>
+                    <div v-if="period.half !== 1">
                         <p class="text-xs text-white/70">{{ monthPayDay(15) }}</p>
                         <p class="num mt-1 text-lg text-white">{{ pesos(figures.second_cutoff) }}</p>
+                        <p v-if="funding.second.saved" class="mt-1 text-xs text-white/70">saved {{ pesos(funding.second.saved) }}</p>
+                        <p class="mt-1 text-xs text-white/70">left {{ pesos(funding.second.leftover) }}</p>
                     </div>
                 </div>
+                <p class="mx-auto mt-4 w-fit text-sm text-white/90">
+                    Saved {{ pesos(figures.saved) }}
+                    <span class="text-white/70"> · left {{ pesos(figures.approx_savings) }}</span>
+                </p>
             </PageHero>
         </template>
 
@@ -202,6 +235,12 @@ const donutTotal = computed(() => topList.value.reduce((sum, row) => sum + Math.
                 <div>
                     <dt>Living</dt>
                     <dd class="num">{{ pesos(figures.view_daily) }}</dd>
+                    <p class="mt-1 text-xs text-moss">{{ pesos(figures.living_plan) }} − {{ pesos(figures.living_spent) }}</p>
+                </div>
+                <div>
+                    <dt>Saved</dt>
+                    <dd class="num" :class="figures.saved < 0 ? 'text-clay' : 'text-palm-deep'">{{ pesos(figures.saved) }}</dd>
+                    <p class="mt-1 text-xs text-moss">left {{ pesos(figures.approx_savings) }}</p>
                 </div>
             </dl>
         </section>
