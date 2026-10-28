@@ -6,6 +6,7 @@ use App\Http\Requests\DayLogRequest;
 use App\Http\Requests\TransactionRequest;
 use App\Models\Category;
 use App\Models\Transaction;
+use App\Services\DueWhen;
 use App\Services\Ledger;
 use App\Services\MonthSheet;
 use App\Services\Wallets;
@@ -27,7 +28,7 @@ class TransactionController extends Controller
         return $this->page($request, $ledger, 'daily');
     }
 
-    public function bills(Request $request, Ledger $ledger, Wallets $wallets, MonthSheet $sheet): Response
+    public function bills(Request $request, Ledger $ledger, Wallets $wallets, MonthSheet $sheet, DueWhen $dueWhen): Response
     {
         $period = Period::fromRequest($request);
         $types = ['bill', 'debt_payment'];
@@ -40,12 +41,15 @@ class TransactionController extends Controller
             ->orderBy('name')
             ->get()
             ->reject(fn (Category $bill): bool => $wallets->isCreditAccount($bill->slug, $bill->name))
-            ->map(function (Category $bill) use ($transactions): array {
+            ->filter(fn (Category $bill): bool => $dueWhen->matchesHalf($dueWhen->for('bills', $bill->id), $period->half))
+            ->map(function (Category $bill) use ($transactions, $dueWhen): array {
                 $payments = $transactions
                     ->filter(fn (Transaction $row): bool => $row->category_id === $bill->id && $row->type === 'bill');
                 $spent = $payments->sum(fn (Transaction $row): float => $row->direction === 'in' ? -(float) $row->amount : (float) $row->amount);
                 $latest = $payments->first();
                 $item = $latest?->toListItem();
+
+                $due = $dueWhen->decorate('bills', $bill->id);
 
                 return [
                     'id' => $bill->id,
@@ -55,6 +59,9 @@ class TransactionController extends Controller
                     'plan' => (float) $bill->monthly_plan,
                     'spent' => round((float) $spent, 2),
                     'paid' => round((float) $spent, 2) > 0,
+                    'due_mode' => $due['mode'],
+                    'due_day' => $due['day'],
+                    'due_label' => $due['label'],
                     'payment' => $item === null ? null : [
                         'id' => $item['id'],
                         'occurred_on' => $item['occurred_on'],
@@ -84,7 +91,12 @@ class TransactionController extends Controller
             'pay_on' => $period->payOn(),
             'bills' => $bills,
             'computed_bills' => $sheet->computedBills($period, $creditDues),
-            'loans' => $sheet->loans($period),
+            'loans' => $sheet->loans($period)
+                ->filter(fn (array $loan): bool => $dueWhen->matchesHalf(
+                    ['mode' => $loan['due_mode'] ?? null, 'day' => $loan['due_day'] ?? null],
+                    $period->half,
+                ))
+                ->values(),
             'credit_dues' => $creditDues,
             'wallets' => $wallets->all(),
             'pay_sources' => $wallets->paySources(),

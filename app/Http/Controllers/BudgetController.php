@@ -8,6 +8,7 @@ use App\Models\Category;
 use App\Models\Debt;
 use App\Models\Salary;
 use App\Models\Setting;
+use App\Services\DueWhen;
 use App\Services\Ledger;
 use App\Services\Wallets;
 use App\Support\Cutoff;
@@ -21,7 +22,7 @@ use Inertia\Response;
 
 class BudgetController extends Controller
 {
-    public function edit(Request $request, Ledger $ledger, Wallets $wallets): Response
+    public function edit(Request $request, Ledger $ledger, Wallets $wallets, DueWhen $dueWhen): Response
     {
         $monthStart = CarbonImmutable::today()->startOfMonth();
         $year = $monthStart->year;
@@ -98,15 +99,31 @@ class BudgetController extends Controller
             'left_if_followed' => round($monthPay - $spending, 2),
             'salaries' => $salaries->map(fn (Salary $salary): array => $salary->toListItem())->values(),
             'bonuses' => Bonus::query()->orderByDesc('received_on')->orderByDesc('id')->get()->map(fn (Bonus $bonus): array => $bonus->toListItem())->values(),
-            'bills' => $bills->map(fn (Category $bill): array => [
-                'id' => $bill->id,
-                'name' => $bill->name,
-                'slug' => $bill->slug,
-                'monthly_plan' => (float) $bill->monthly_plan,
-                'color' => $bill->color,
-            ])->values(),
+            'bills' => $bills->map(function (Category $bill) use ($dueWhen): array {
+                $due = $dueWhen->decorate('bills', $bill->id);
+
+                return [
+                    'id' => $bill->id,
+                    'name' => $bill->name,
+                    'slug' => $bill->slug,
+                    'monthly_plan' => (float) $bill->monthly_plan,
+                    'color' => $bill->color,
+                    'due_mode' => $due['mode'],
+                    'due_day' => $due['day'],
+                    'due_label' => $due['label'],
+                ];
+            })->values(),
             'computed_bills' => $wallets->computedBillsForMonth($year, $month),
-            'loans' => $loans,
+            'loans' => $loans->map(function (array $loan) use ($dueWhen): array {
+                $due = $dueWhen->decorate('loans', $loan['id']);
+
+                return [
+                    ...$loan,
+                    'due_mode' => $due['mode'],
+                    'due_day' => $due['day'],
+                    'due_label' => $due['label'],
+                ];
+            })->values(),
         ]);
     }
 

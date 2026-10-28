@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Head, useForm } from '@inertiajs/vue3'
+import { Head, Link, useForm } from '@inertiajs/vue3'
 import { computed, ref } from 'vue'
 import AppLayout from '../../Components/AppLayout.vue'
 import PageHero from '../../Components/PageHero.vue'
@@ -31,6 +31,7 @@ interface BillRow {
     plan: number
     spent: number
     paid: boolean
+    due_label: string | null
     payment: BillPayment | null
 }
 
@@ -57,6 +58,7 @@ interface LoanRow {
     due_this_period: boolean
     paid_this_period: boolean
     spent_this_period: number
+    due_label: string | null
 }
 
 interface CreditDueRow {
@@ -368,6 +370,20 @@ function prettyDate(iso: string) {
         day: 'numeric',
     })
 }
+
+function halfHref(half?: number) {
+    const params = new URLSearchParams({
+        span: props.period.span ?? 'month',
+        year: String(props.period.year),
+        month: String(props.period.month),
+    })
+
+    if (half) {
+        params.set('half', String(half))
+    }
+
+    return `/bills?${params.toString()}`
+}
 </script>
 
 <template>
@@ -406,7 +422,14 @@ function prettyDate(iso: string) {
         <section class="card mt-4 overflow-x-auto">
             <div class="sheet-head">
                 <h2>Bills</h2>
-                <PeriodPicker :period="period" base="/bills" />
+                <div class="flex flex-wrap items-center gap-2">
+                    <PeriodPicker :period="period" base="/bills" />
+                    <div class="flex gap-1" role="group" aria-label="Cutoff">
+                        <Link :href="halfHref()" preserve-scroll class="btn-ghost py-1 text-xs" :class="period.half === null ? 'is-on' : ''">Month</Link>
+                        <Link :href="halfHref(1)" preserve-scroll class="btn-ghost py-1 text-xs" :class="period.half === 1 ? 'is-on' : ''">1–15</Link>
+                        <Link :href="halfHref(2)" preserve-scroll class="btn-ghost py-1 text-xs" :class="period.half === 2 ? 'is-on' : ''">16–end</Link>
+                    </div>
+                </div>
             </div>
             <table class="data-table">
                 <caption class="sr-only">Bills</caption>
@@ -426,6 +449,7 @@ function prettyDate(iso: string) {
                         <td class="px-3 py-1.5">
                             <span class="mr-2 inline-block size-2 rounded-full align-middle" :style="{ background: bill.color }" />
                             {{ bill.name }}
+                            <span v-if="bill.due_label" class="ml-2 text-xs text-moss">{{ bill.due_label }}</span>
                             <span v-if="bill.paid" class="ml-2 text-xs text-palm-deep">Paid</span>
                         </td>
                         <td class="num whitespace-nowrap px-3 py-1.5 text-right">{{ pesos(bill.spent) }}</td>
@@ -535,6 +559,7 @@ function prettyDate(iso: string) {
                     <tr v-for="loan in loans" :key="loan.id" class="border-t border-line hover:bg-mist/60">
                         <td class="px-3 py-1.5">
                             {{ loan.name }}
+                            <span v-if="loan.due_label" class="ml-2 text-xs text-moss">{{ loan.due_label }}</span>
                             <span v-if="loan.installments_remaining != null" class="ml-2 text-xs text-moss">{{ loan.installments_remaining }} left</span>
                             <span v-if="loan.paid_this_period" class="ml-2 text-xs text-palm-deep">Paid</span>
                         </td>

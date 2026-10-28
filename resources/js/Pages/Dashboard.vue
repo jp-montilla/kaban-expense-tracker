@@ -58,6 +58,14 @@ interface TopSpend {
     share: number
 }
 
+interface TopLiving {
+    rank: number
+    id: number
+    description: string
+    amount: number
+    occurred_on: string
+}
+
 interface DueRow {
     id: string
     name: string
@@ -90,10 +98,13 @@ const props = defineProps<{
     debts: DebtCard[]
     logCategories: Array<{ id: number; name: string; slug: string; kind: string; color: string }>
     top_spends: { month: TopSpend[]; year: TopSpend[]; all: TopSpend[] }
+    top_living: { month: TopLiving[]; year: TopLiving[]; all: TopLiving[] }
 }>()
 
 const spendScope = ref<'month' | 'year' | 'all'>('month')
+const livingScope = ref<'month' | 'year' | 'all'>('month')
 const topList = computed(() => props.top_spends[spendScope.value] ?? [])
+const livingList = computed(() => props.top_living[livingScope.value] ?? [])
 
 function halfHref(half?: number) {
     const params = new URLSearchParams({
@@ -177,6 +188,10 @@ const donutTotal = computed(() => topList.value.reduce((sum, row) => sum + Math.
                     <dd class="num">{{ pesos(figures.income) }}</dd>
                 </div>
                 <div>
+                    <dt>Spent</dt>
+                    <dd class="num">{{ pesos(figures.view_actual) }}</dd>
+                </div>
+                <div>
                     <dt>Bills</dt>
                     <dd class="num">{{ pesos(figures.view_bills) }}</dd>
                 </div>
@@ -250,6 +265,37 @@ const donutTotal = computed(() => topList.value.reduce((sum, row) => sum + Math.
                         <td class="num text-right" :class="item.direction === 'in' ? 'text-palm-deep' : ''">
                             {{ item.direction === 'in' ? '+' : '−' }}{{ pesos(Math.abs(item.amount)) }}
                         </td>
+                    </tr>
+                </tbody>
+            </table>
+        </section>
+
+        <section class="card mt-4 overflow-x-auto">
+            <div class="sheet-head">
+                <h2>Priciest living</h2>
+                <div class="flex gap-1" role="group" aria-label="Living range">
+                    <button type="button" class="btn-ghost py-1 text-xs" :class="livingScope === 'month' ? 'is-on' : ''" @click="livingScope = 'month'">Month</button>
+                    <button type="button" class="btn-ghost py-1 text-xs" :class="livingScope === 'year' ? 'is-on' : ''" @click="livingScope = 'year'">{{ period.year }}</button>
+                    <button type="button" class="btn-ghost py-1 text-xs" :class="livingScope === 'all' ? 'is-on' : ''" @click="livingScope = 'all'">All</button>
+                </div>
+            </div>
+            <table class="data-table">
+                <caption class="sr-only">Top living expenses</caption>
+                <thead>
+                    <tr>
+                        <th scope="col">Date</th>
+                        <th scope="col">Item</th>
+                        <th scope="col" class="text-right">Amount</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr v-if="livingList.length === 0">
+                        <td colspan="3" class="text-moss">No living spends in this range.</td>
+                    </tr>
+                    <tr v-for="row in livingList" :key="`${livingScope}-${row.id}`">
+                        <td class="whitespace-nowrap text-moss">{{ prettyDay(row.occurred_on) }}</td>
+                        <td>{{ row.description }}</td>
+                        <td class="num text-right">{{ pesos(row.amount) }}</td>
                     </tr>
                 </tbody>
             </table>

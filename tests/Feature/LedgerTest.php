@@ -56,7 +56,9 @@ class LedgerTest extends TestCase
 
                     return $rows->count() === 1 && $rows[0]['slug'] === 'daily' && $rows[0]['name'] === 'Living';
                 })
-                ->where('top_spends.all', fn ($rows) => $rows->contains('name', 'Living') && $rows->contains('name', 'Meralco')));
+                ->where('top_spends.all', fn ($rows) => $rows->contains('name', 'Living') && $rows->contains('name', 'Meralco'))
+                ->where('top_living.month', fn ($rows) => collect($rows)->count() > 0 && collect($rows)->count() <= 10)
+                ->where('figures.view_actual', 47619));
 
         $this->get('/?year=2026&month=10&half=1')
             ->assertOk()
@@ -396,5 +398,103 @@ class LedgerTest extends TestCase
         $this->assertNull($personal->installment_count);
         $this->assertNull($personal->installment_amount);
         $this->assertSame('5000.00', $personal->principal);
+    }
+
+    public function test_dashboard_lists_the_priciest_living_lines(): void
+    {
+        $this->travelTo('2026-10-22');
+        $this->seed(LedgerSeeder::class);
+        $this->actingAs(User::owner());
+
+        $this->post('/log', [
+            'occurred_on' => '2026-10-22',
+            'items' => [[
+                'description' => 'Crazy dinner',
+                'amount' => 9999,
+                'type' => 'daily',
+            ]],
+        ])->assertRedirect();
+
+        $this->get('/?year=2026&month=10')
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('top_living.month.0.description', 'Crazy dinner')
+                ->where('top_living.month.0.amount', 9999)
+                ->where('figures.view_actual', fn ($amount) => (float) $amount >= 9999));
+    }
+
+    public function test_bills_and_loans_can_be_due_first_or_second_half(): void
+    {
+        $this->travelTo('2026-10-22');
+        $this->seed(LedgerSeeder::class);
+        $this->actingAs(User::owner());
+
+        $meralco = Category::query()->where('slug', 'meralco')->firstOrFail();
+        $cursor = Category::query()->where('slug', 'cursor')->firstOrFail();
+
+        $this->put("/bills/{$meralco->id}", [
+            'name' => $meralco->name,
+            'monthly_plan' => $meralco->monthly_plan,
+            'due_mode' => 'first',
+        ])->assertRedirect();
+
+        $this->put("/bills/{$cursor->id}", [
+            'name' => $cursor->name,
+            'monthly_plan' => $cursor->monthly_plan,
+            'due_mode' => 'exact',
+            'due_day' => 20,
+        ])->assertRedirect();
+
+        $this->get('/bills?year=2026&month=10&half=1')
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('bills', fn ($rows) => collect($rows)->contains('slug', 'meralco')
+                    && collect($rows)->contains('due_label', '1–15')
+                    && collect($rows)->doesntContain('slug', 'cursor')));
+
+        $this->get('/bills?year=2026&month=10&half=2')
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('bills', fn ($rows) => collect($rows)->contains('slug', 'cursor')
+                    && collect($rows)->contains('due_label', '20th')
+                    && collect($rows)->doesntContain('slug', 'meralco')));
+
+        $loan = Debt::query()->where('status', 'active')->whereNotNull('installment_count')->firstOrFail();
+
+        $this->put("/debts/{$loan->id}", [
+            'name' => $loan->name,
+            'creditor' => $loan->creditor,
+            'item' => $loan->item,
+            'principal' => $loan->principal,
+            'is_monthly' => true,
+            'installment_amount' => $loan->installment_amount,
+            'installment_count' => $loan->installment_count,
+            'notes' => $loan->notes,
+            'due_mode' => 'second',
+        ])->assertRedirect();
+
+        $this->get('/loans')
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('debts', fn ($rows) => collect($rows)->contains(
+                    fn ($row) => (int) $row['id'] === $loan->id
+                        && $row['due_mode'] === 'second'
+                        && $row['due_label'] === '16–end',
+                )));
+
+        $this->get('/bills?year=2026&month=10&half=1')
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('loans', fn ($rows) => collect($rows)->every(
+                    fn ($row) => (int) $row['id'] !== $loan->id,
+                )));
+
+        $this->get('/bills?year=2026&month=10&half=2')
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('loans', fn ($rows) => collect($rows)->contains(
+                    fn ($row) => (int) $row['id'] === $loan->id
+                        && $row['due_label'] === '16–end',
+                )));
     }
 }

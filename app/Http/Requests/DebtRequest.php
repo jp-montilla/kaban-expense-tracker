@@ -5,6 +5,7 @@ namespace App\Http\Requests;
 use App\Models\Debt;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Validation\Rule;
 
 class DebtRequest extends FormRequest
 {
@@ -27,6 +28,8 @@ class DebtRequest extends FormRequest
             'installment_amount' => ['required_if:is_monthly,true', 'nullable', 'numeric', 'min:0.01', 'max:99999999'],
             'installment_count' => ['required_if:is_monthly,true', 'nullable', 'integer', 'min:1', 'max:600'],
             'notes' => ['nullable', 'string', 'max:1000'],
+            'due_mode' => ['nullable', 'string', Rule::in(['first', 'second', 'exact'])],
+            'due_day' => ['nullable', 'integer', 'min:1', 'max:28', 'required_if:due_mode,exact'],
         ];
     }
 
@@ -70,6 +73,15 @@ class DebtRequest extends FormRequest
         if ($this->boolean('is_monthly') && $this->filled('installment_amount') && $this->filled('installment_count')) {
             $this->merge([
                 'principal' => round((float) $this->input('installment_amount') * (int) $this->input('installment_count'), 2),
+            ]);
+        }
+
+        $mode = $this->input('due_mode');
+
+        if ($mode === '' || $mode === 'anytime') {
+            $this->merge([
+                'due_mode' => null,
+                'due_day' => null,
             ]);
         }
     }

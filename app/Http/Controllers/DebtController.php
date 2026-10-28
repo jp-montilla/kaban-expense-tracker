@@ -7,6 +7,7 @@ use App\Http\Requests\DebtRequest;
 use App\Models\Debt;
 use App\Models\DebtPayment;
 use App\Models\Transaction;
+use App\Services\DueWhen;
 use App\Services\Wallets;
 use Illuminate\Http\RedirectResponse;
 use Inertia\Inertia;
@@ -14,16 +15,21 @@ use Inertia\Response;
 
 class DebtController extends Controller
 {
-    public function index(Wallets $wallets): Response
+    public function index(Wallets $wallets, DueWhen $dueWhen): Response
     {
         $debts = Debt::query()
             ->with(['payments' => fn ($query) => $query->orderByDesc('occurred_on')->orderByDesc('id'), 'category'])
             ->orderBy('status')
             ->orderBy('name')
             ->get()
-            ->map(function (Debt $debt): array {
+            ->map(function (Debt $debt) use ($dueWhen): array {
+                $due = $dueWhen->decorate('loans', $debt->id);
+
                 return [
                     ...$debt->toSummaryArray(),
+                    'due_mode' => $due['mode'],
+                    'due_day' => $due['day'],
+                    'due_label' => $due['label'],
                     'payments' => $debt->payments->map(fn (DebtPayment $payment): array => [
                         'id' => $payment->id,
                         'occurred_on' => $payment->occurred_on->toDateString(),
@@ -41,16 +47,20 @@ class DebtController extends Controller
         ]);
     }
 
-    public function store(DebtRequest $request): RedirectResponse
+    public function store(DebtRequest $request, DueWhen $dueWhen): RedirectResponse
     {
-        Debt::query()->create($request->debtAttributes());
+        $data = $request->validated();
+        $debt = Debt::query()->create($request->debtAttributes());
+        $dueWhen->put('loans', $debt->id, $data['due_mode'] ?? null, $data['due_day'] ?? null);
 
         return back()->with('success', 'Loan added.');
     }
 
-    public function update(DebtRequest $request, Debt $debt): RedirectResponse
+    public function update(DebtRequest $request, Debt $debt, DueWhen $dueWhen): RedirectResponse
     {
+        $data = $request->validated();
         $debt->update($request->debtAttributes());
+        $dueWhen->put('loans', $debt->id, $data['due_mode'] ?? null, $data['due_day'] ?? null);
         $debt->refreshStatus();
 
         return back()->with('success', 'Loan updated.');

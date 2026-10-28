@@ -6,7 +6,9 @@ import PageHero from '../../Components/PageHero.vue'
 import Modal from '../../Components/Modal.vue'
 import PaySourceSelect from '../../Components/PaySourceSelect.vue'
 import { confirmDelete } from '../../lib/confirm'
+import DueWhenFields from '../../Components/DueWhenFields.vue'
 import { pesos } from '../../lib/money'
+import type { DueMode } from '../../lib/dueWhen'
 import type { WalletRow } from '../../lib/wallets'
 
 interface Payment {
@@ -35,6 +37,9 @@ interface DebtItem {
     installments_paid: number
     installments_remaining: number | null
     notes: string | null
+    due_mode: DueMode
+    due_day: number | null
+    due_label: string | null
     payments: Payment[]
 }
 
@@ -139,6 +144,8 @@ const createForm = useForm({
     installment_amount: '',
     installment_count: '',
     notes: '',
+    due_mode: null as DueMode,
+    due_day: null as number | null,
 })
 
 function setCreateMonthly(monthly: boolean) {
@@ -169,6 +176,8 @@ function editForm(debt: DebtItem) {
         installment_amount: debt.installment_amount === null ? '' : String(debt.installment_amount),
         installment_count: debt.installment_count === null ? '' : String(debt.installment_count),
         notes: debt.notes ?? '',
+        due_mode: debt.due_mode,
+        due_day: debt.due_day,
     })
 }
 
@@ -280,6 +289,7 @@ function terms(debt: DebtItem) {
                         <td>
                             {{ debt.name }}
                             <span v-if="debt.creditor" class="text-moss"> · {{ debt.creditor }}</span>
+                            <span v-if="debt.due_label" class="ml-2 text-xs text-moss">{{ debt.due_label }}</span>
                         </td>
                         <td class="whitespace-nowrap text-moss">{{ terms(debt) }}</td>
                         <td class="num text-right">{{ pesos(debt.paid) }}</td>
@@ -335,6 +345,9 @@ function terms(debt: DebtItem) {
                     <span class="kicker">How much</span>
                     <input v-model="createForm.principal" required type="number" min="0.01" step="0.01" class="field">
                 </label>
+                <div class="sm:col-span-2">
+                    <DueWhenFields v-model:mode="createForm.due_mode" v-model:day="createForm.due_day" />
+                </div>
                 <label class="grid gap-1 sm:col-span-2">
                     <span class="kicker">Notes</span>
                     <textarea v-model="createForm.notes" rows="2" class="field" />
@@ -383,6 +396,9 @@ function terms(debt: DebtItem) {
                     <span class="kicker">How much</span>
                     <input v-model="editorFor(editing).principal" required type="number" min="0.01" step="0.01" class="field">
                 </label>
+                <div class="sm:col-span-2">
+                    <DueWhenFields v-model:mode="editorFor(editing).due_mode" v-model:day="editorFor(editing).due_day" />
+                </div>
                 <label class="grid gap-1 sm:col-span-2">
                     <span class="kicker">Notes</span>
                     <textarea v-model="editorFor(editing).notes" rows="2" class="field" />

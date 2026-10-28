@@ -26,6 +26,8 @@ class BillRequest extends FormRequest
         return [
             'name' => ['required', 'string', 'max:80'],
             'monthly_plan' => ['required', 'numeric', 'min:0', 'max:99999999'],
+            'due_mode' => ['nullable', 'string', Rule::in(['first', 'second', 'exact'])],
+            'due_day' => ['nullable', 'integer', 'min:1', 'max:28', 'required_if:due_mode,exact'],
             'slug' => [
                 'nullable',
                 'string',
@@ -54,5 +56,17 @@ class BillRequest extends FormRequest
                 }
             },
         ];
+    }
+
+    protected function prepareForValidation(): void
+    {
+        $mode = $this->input('due_mode');
+
+        if ($mode === '' || $mode === 'anytime') {
+            $this->merge([
+                'due_mode' => null,
+                'due_day' => null,
+            ]);
+        }
     }
 }

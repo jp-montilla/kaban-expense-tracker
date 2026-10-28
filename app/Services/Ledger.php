@@ -118,6 +118,11 @@ class Ledger
                 'year' => $this->rankCategories($this->spendTransactions()->whereYear('occurred_on', $year)->get()),
                 'all' => $this->rankCategories($this->spendTransactions()->get()),
             ],
+            'top_living' => [
+                'month' => $this->rankLiving($monthTransactions),
+                'year' => $this->rankLivingQuery($year),
+                'all' => $this->rankLivingQuery(null),
+            ],
             'trend' => $trend,
             'recent' => ($period->span === 'month' ? $monthTransactions : $viewTransactions)
                 ->take(6)
@@ -448,6 +453,48 @@ class Ledger
                 return $row;
             })
             ->all();
+    }
+
+    /**
+     * @param  Collection<int, Transaction>  $transactions
+     * @return list<array{rank: int, id: int, description: string, amount: float, occurred_on: string}>
+     */
+    public function rankLiving(Collection $transactions, int $limit = 10): array
+    {
+        return $transactions
+            ->filter(fn (Transaction $transaction): bool => $transaction->type === 'daily'
+                && $transaction->direction === 'out'
+                && (float) $transaction->amount >= 0.01)
+            ->sortByDesc(fn (Transaction $transaction): float => (float) $transaction->amount)
+            ->take($limit)
+            ->values()
+            ->map(fn (Transaction $transaction, int $index): array => [
+                'rank' => $index + 1,
+                'id' => $transaction->id,
+                'description' => $transaction->description,
+                'amount' => (float) $transaction->amount,
+                'occurred_on' => $transaction->occurred_on->toDateString(),
+            ])
+            ->all();
+    }
+
+    /**
+     * @return list<array{rank: int, id: int, description: string, amount: float, occurred_on: string}>
+     */
+    private function rankLivingQuery(?int $year, int $limit = 10): array
+    {
+        $query = Transaction::query()
+            ->where('type', 'daily')
+            ->where('direction', 'out')
+            ->orderByDesc('amount')
+            ->orderByDesc('occurred_on')
+            ->limit($limit);
+
+        if ($year !== null) {
+            $query->whereYear('occurred_on', $year);
+        }
+
+        return $this->rankLiving($query->get(), $limit);
     }
 
     /**

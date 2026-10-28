@@ -15,7 +15,7 @@ use Illuminate\Support\Str;
 
 class MonthSheet
 {
-    public function __construct(private Wallets $wallets) {}
+    public function __construct(private Wallets $wallets, private DueWhen $dueWhen) {}
 
     /**
      * @return Collection<int, array<string, mixed>>
@@ -23,6 +23,7 @@ class MonthSheet
     public function creditDues(Period $period): Collection
     {
         return collect($this->wallets->duesForPeriod($period->start, $period->end))
+            ->filter(fn (array $due): bool => $this->dueWhen->matchesDate($due['due_on'] ?? null, $period->half))
             ->map(fn (array $due): array => [
                 ...$due,
                 'payable' => $due['paid_on'] === null,
@@ -92,6 +93,21 @@ class MonthSheet
                     ],
                 ];
             })
+            ->filter(function (array $row) use ($period, $creditDues): bool {
+                if ($period->half === null) {
+                    return true;
+                }
+
+                $dues = $creditDues->where('wallet_id', $row['id']);
+
+                if ($dues->isNotEmpty()) {
+                    return true;
+                }
+
+                $day = ($row['slug'] ?? '') === 'lazpay' ? 16 : 15;
+
+                return $this->dueWhen->matchesHalf(['mode' => DueWhen::EXACT, 'day' => $day], $period->half);
+            })
             ->values();
     }
 
@@ -141,10 +157,15 @@ class MonthSheet
                     $this->lastPaidOn($debt, $sheetPays->get($debt->category_id) ?? collect()),
                     is_int($remaining) ? $remaining : null,
                 );
+                $due = $this->dueWhen->decorate('loans', $debt->id);
+                $dueThisMonth = $debt->isMonthly() && $open && ($spent > 0 || $inWindow);
 
                 return [
                     ...$summary,
-                    'due_this_period' => $debt->isMonthly() && $open && ($spent > 0 || $inWindow),
+                    'due_mode' => $due['mode'],
+                    'due_day' => $due['day'],
+                    'due_label' => $due['label'],
+                    'due_this_period' => $dueThisMonth && $this->dueWhen->matchesHalf($due, $period->half),
                     'paid_this_period' => $spent > 0,
                     'spent_this_period' => $spent,
                 ];
@@ -210,6 +231,7 @@ class MonthSheet
             ->where('is_active', true)
             ->get()
             ->reject(fn (Category $bill): bool => $this->wallets->isCreditAccount($bill->slug, $bill->name))
+            ->filter(fn (Category $bill): bool => $this->dueWhen->matchesHalf($this->dueWhen->for('bills', $bill->id), $period->half))
             ->values();
         $spentByCategory = $bills->isEmpty()
             ? collect()

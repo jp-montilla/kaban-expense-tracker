@@ -7,7 +7,9 @@ import BusyOverlay from '../../Components/BusyOverlay.vue'
 import Modal from '../../Components/Modal.vue'
 import { confirmDelete } from '../../lib/confirm'
 import { pesos } from '../../lib/money'
+import DueWhenFields from '../../Components/DueWhenFields.vue'
 import { emptyPlans, groupedWallets, type WalletGroup, type WalletPlan, type WalletRow } from '../../lib/wallets'
+import type { DueMode } from '../../lib/dueWhen'
 
 interface SalaryRow {
     id: number
@@ -32,6 +34,9 @@ interface BillRow {
     slug: string
     monthly_plan: number
     color: string
+    due_mode: DueMode
+    due_day: number | null
+    due_label: string | null
 }
 
 interface ComputedBillRow {
@@ -51,6 +56,7 @@ interface LoanRow {
     installment_count: number | null
     installments_paid: number
     installments_remaining: number | null
+    due_label: string | null
 }
 
 const props = defineProps<{
@@ -112,6 +118,8 @@ const bonusForm = useForm({
 const billForm = useForm({
     name: '',
     monthly_plan: '',
+    due_mode: null as DueMode,
+    due_day: null as number | null,
 })
 
 const passwordForm = useForm({
@@ -323,6 +331,8 @@ function openEditBill(row: BillRow) {
     editingBill.value = row
     billForm.name = row.name
     billForm.monthly_plan = String(row.monthly_plan)
+    billForm.due_mode = row.due_mode
+    billForm.due_day = row.due_day
     billForm.clearErrors()
     showBill.value = true
 }
@@ -585,6 +595,7 @@ function savePassword() {
                         <td class="px-3 py-1.5">
                             <span class="mr-2 inline-block size-2 rounded-full align-middle" :style="{ background: bill.color }" />
                             {{ bill.name }}
+                            <span v-if="bill.due_label" class="ml-2 text-xs text-moss">{{ bill.due_label }}</span>
                         </td>
                         <td class="num whitespace-nowrap px-3 py-1.5 text-right">{{ pesos(bill.monthly_plan) }}</td>
                         <td class="whitespace-nowrap px-3 py-1.5 text-right">
@@ -669,6 +680,7 @@ function savePassword() {
                         <td class="px-3 py-1.5">
                             {{ loan.name }}
                             <span v-if="loan.creditor" class="text-moss"> · {{ loan.creditor }}</span>
+                            <span v-if="loan.due_label" class="ml-2 text-xs text-moss">{{ loan.due_label }}</span>
                         </td>
                         <td class="whitespace-nowrap px-3 py-1.5 text-moss">
                             <template v-if="loan.is_monthly && loan.installment_count">
@@ -752,6 +764,7 @@ function savePassword() {
                     <span class="kicker">Set budget</span>
                     <input v-model="billForm.monthly_plan" type="number" min="0" step="0.01" required class="field">
                 </label>
+                <DueWhenFields v-model:mode="billForm.due_mode" v-model:day="billForm.due_day" />
                 <button class="btn w-fit" :disabled="billForm.processing">Save</button>
                 <p v-if="billForm.errors.name || billForm.errors.monthly_plan" class="text-sm text-clay">
                     {{ billForm.errors.name || billForm.errors.monthly_plan }}

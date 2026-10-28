@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Http\Requests\BillRequest;
 use App\Models\Category;
+use App\Services\DueWhen;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Str;
 
@@ -17,7 +18,7 @@ class BillController extends Controller
         $slug = $data['slug'] ?? Str::slug($data['name']);
         $slug = $slug !== '' ? $slug : 'bill';
 
-        Category::query()->create([
+        $bill = Category::query()->create([
             'name' => $data['name'],
             'slug' => $slug,
             'kind' => 'bill',
@@ -26,6 +27,8 @@ class BillController extends Controller
             'sort_order' => $max + 10,
             'is_active' => true,
         ]);
+
+        app(DueWhen::class)->put('bills', $bill->id, $data['due_mode'] ?? null, $data['due_day'] ?? null);
 
         return back()->with('success', 'Bill added.');
     }
@@ -39,6 +42,8 @@ class BillController extends Controller
             'name' => $data['name'],
             'monthly_plan' => $data['monthly_plan'],
         ]);
+
+        app(DueWhen::class)->put('bills', $bill->id, $data['due_mode'] ?? null, $data['due_day'] ?? null);
 
         return back()->with('success', 'Bill updated.');
     }
