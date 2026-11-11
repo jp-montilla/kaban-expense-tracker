@@ -526,6 +526,10 @@ class Wallets
         $dues = [];
 
         foreach ($this->stash() as $row) {
+            if (($row['deleted_at'] ?? null) !== null) {
+                continue;
+            }
+
             foreach ($row['charges'] as $charge) {
                 $createdAt = (string) ($charge['created_at'] ?? '1970-01-01T00:00:00+00:00');
                 $statement = $this->isStatementCharge($row['slug'], $row['name'], (string) $charge['description']);

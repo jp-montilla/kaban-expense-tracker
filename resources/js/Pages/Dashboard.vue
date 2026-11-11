@@ -112,6 +112,8 @@ interface DebtCard {
     installment_count: number | null
     installments_paid: number
     installments_remaining: number | null
+    due_this_period?: boolean
+    paid_this_period?: boolean
 }
 
 const props = defineProps<{
@@ -227,6 +229,18 @@ const secondPay = computed(() => {
     }
 })
 
+const billsPaid = computed(() => props.cash_bills.length > 0 && props.cash_bills.every((row) => row.paid))
+const creditPaid = computed(() => {
+    const rows = props.dues.filter((due) => due.kind === 'credit')
+
+    return rows.length > 0 && rows.every((due) => due.paid)
+})
+const loanPaid = computed(() => {
+    const rows = props.dues.filter((due) => due.kind === 'loan')
+
+    return rows.length > 0 && rows.every((due) => due.paid)
+})
+
 const overview = computed<OverviewTile[]>(() => [
     {
         label: 'Income',
@@ -243,18 +257,21 @@ const overview = computed<OverviewTile[]>(() => [
     {
         label: 'Bills',
         value: pesos(props.figures.view_bills),
+        badge: billsPaid.value ? 'Paid' : undefined,
         icon: 'bills',
         wrap: 'bg-[#EEEBFF] text-accent',
     },
     {
         label: 'Credit',
         value: pesos(props.figures.view_credit),
+        badge: creditPaid.value ? 'Paid' : undefined,
         icon: 'wallet',
         wrap: 'bg-[#FFF1E8] text-[#E67E22]',
     },
     {
         label: 'Loan',
         value: pesos(props.figures.view_loan),
+        badge: loanPaid.value ? 'Paid' : undefined,
         icon: 'lock',
         wrap: 'bg-[#E8F1FF] text-income',
     },
@@ -467,6 +484,10 @@ const creditRows = computed(() => {
                             <td>
                                 {{ debt.name }}
                                 <span class="text-moss"> · {{ debt.progress }}%</span>
+                                <span
+                                    v-if="debt.paid_this_period"
+                                    class="ml-2 rounded-full bg-[#E8F8EF] px-2 py-0.5 text-[11px] font-semibold text-palm-deep"
+                                >Paid</span>
                             </td>
                             <td class="num text-right">{{ pesos(debt.balance) }}</td>
                         </tr>

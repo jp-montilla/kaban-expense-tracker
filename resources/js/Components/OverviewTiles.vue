@@ -7,6 +7,8 @@ export interface OverviewTile {
     label: string
     value: string
     hint?: string
+    badge?: string
+    badgeClass?: string
     valueClass?: string
     icon: IconName
     wrap: string
@@ -41,7 +43,14 @@ const gridClass = computed(() => {
             <span class="grid size-10 place-items-center rounded-full" :class="tile.wrap">
                 <Icon :name="tile.icon" :size="18" />
             </span>
-            <p class="mt-3 text-sm text-moss">{{ tile.label }}</p>
+            <p class="mt-3 flex flex-wrap items-center gap-2 text-sm text-moss">
+                <span>{{ tile.label }}</span>
+                <span
+                    v-if="tile.badge"
+                    class="rounded-full px-2 py-0.5 text-[11px] font-semibold"
+                    :class="tile.badgeClass ?? 'bg-[#E8F8EF] text-palm-deep'"
+                >{{ tile.badge }}</span>
+            </p>
             <p class="num mt-1 truncate text-lg" :class="tile.valueClass">{{ tile.value }}</p>
             <p v-if="tile.hint" class="mt-1 truncate text-xs text-moss">{{ tile.hint }}</p>
         </div>

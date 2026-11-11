@@ -132,11 +132,34 @@ const planBills = computed(() => props.bills.filter((bill) => bill.plan > 0))
 const cashBills = computed(() => planBills.value.reduce((sum, bill) => sum + (bill.paid ? bill.spent : bill.plan), 0))
 const creditDue = computed(() => props.computed_bills.reduce((sum, bill) => sum + bill.plan, 0))
 const estimatedTotal = computed(() => Math.round((cashBills.value + creditDue.value + props.totals.loan) * 100) / 100)
+const billsPaid = computed(() => planBills.value.length > 0 && planBills.value.every((bill) => bill.paid))
+const creditDueBills = computed(() => props.computed_bills.filter((bill) => bill.plan > 0))
+const creditPaid = computed(() => creditDueBills.value.length > 0 && creditDueBills.value.every((bill) => bill.paid))
+const loansDue = computed(() => props.loans.filter((loan) => loan.due_this_period && loan.status !== 'paid'))
+const loansPaid = computed(() => loansDue.value.length > 0 && loansDue.value.every((loan) => loan.paid_this_period))
 
 const overview = computed<OverviewTile[]>(() => [
-    { label: 'Bills', value: pesos(cashBills.value), icon: 'bills', wrap: 'bg-[#EEEBFF] text-accent' },
-    { label: 'Credit', value: pesos(creditDue.value), icon: 'wallet', wrap: 'bg-[#FFF1E8] text-[#E67E22]' },
-    { label: 'Loans', value: pesos(props.totals.loan), icon: 'lock', wrap: 'bg-[#E8F1FF] text-income' },
+    {
+        label: 'Bills',
+        value: pesos(cashBills.value),
+        badge: billsPaid.value ? 'Paid' : undefined,
+        icon: 'bills',
+        wrap: 'bg-[#EEEBFF] text-accent',
+    },
+    {
+        label: 'Credit',
+        value: pesos(creditDue.value),
+        badge: creditPaid.value ? 'Paid' : undefined,
+        icon: 'wallet',
+        wrap: 'bg-[#FFF1E8] text-[#E67E22]',
+    },
+    {
+        label: 'Loans',
+        value: pesos(props.totals.loan),
+        badge: loansPaid.value ? 'Paid' : undefined,
+        icon: 'lock',
+        wrap: 'bg-[#E8F1FF] text-income',
+    },
 ])
 function statementKey(due: CreditDueRow) {
     return `${due.wallet_id}|${due.due_on}`
