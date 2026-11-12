@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Head, Link, useForm } from '@inertiajs/vue3'
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import AppLayout from '../../Components/AppLayout.vue'
 import DashPanel from '../../Components/DashPanel.vue'
 import OverviewTiles from '../../Components/OverviewTiles.vue'
@@ -325,6 +325,15 @@ const payOpen = computed({
     },
 })
 
+watch(
+    () => [page.via_credit, page.amount, page.credit_months, paying.value?.kind] as const,
+    () => {
+        if (paying.value?.kind === 'bill' && page.via_credit && Number(page.credit_months) === 1) {
+            page.credit_monthly = page.amount
+        }
+    },
+)
+
 function fillPay(
     kind: 'bill' | 'loan' | 'credit_due',
     id: number | string,
@@ -471,7 +480,12 @@ function openExisting(row: PaymentRow) {
 function submitPay() {
     if (page.via_credit && paying.value?.kind === 'bill') {
         page.payment_method = page.credit_method
-        page.amount = page.credit_monthly
+
+        if (Number(page.credit_months) === 1) {
+            page.credit_monthly = page.amount
+        } else {
+            page.amount = page.credit_monthly
+        }
     }
 
     const options = {
@@ -781,7 +795,7 @@ function halfHref(half?: number) {
                 <p v-if="isAdvancePay" class="text-sm text-moss">
                     Paying in advance for {{ prettyDate(page.covers_on) }}.
                 </p>
-                <label v-if="! page.via_credit || paying.kind !== 'bill'" class="grid gap-1">
+                <label v-if="paying.kind !== 'bill' || ! page.via_credit || Number(page.credit_months) === 1" class="grid gap-1">
                     <span class="kicker">Amount</span>
                     <input v-model="page.amount" type="number" min="0.01" step="0.01" required class="field" :readonly="paying.kind === 'credit_due'">
                 </label>
@@ -803,7 +817,12 @@ function halfHref(half?: number) {
                     <input v-model="page.notes" class="field">
                 </label>
                 <div class="flex gap-2">
-                    <button class="btn" :disabled="page.processing || (page.via_credit ? !page.credit_method || !page.credit_monthly : !page.payment_method)">Save</button>
+                    <button
+                        class="btn"
+                        :disabled="page.processing || (page.via_credit
+                            ? ! page.credit_method || ! (Number(page.credit_months) === 1 ? page.amount : page.credit_monthly)
+                            : ! page.payment_method)"
+                    >Save</button>
                     <button type="button" class="btn-ghost" @click="paying = null">Cancel</button>
                 </div>
                 <p v-if="page.errors.payment_method || page.errors.amount" class="text-sm text-clay">
