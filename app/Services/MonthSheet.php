@@ -10,6 +10,7 @@ use App\Models\Transaction;
 use App\Support\CoverTag;
 use App\Support\DueTag;
 use App\Support\Money;
+use App\Support\PayTag;
 use App\Support\Period;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
@@ -238,6 +239,21 @@ class MonthSheet
                     'paid_this_period' => $spent > 0,
                     'prepaid_this_period' => $prepaid,
                     'spent_this_period' => $spent,
+                    'payments' => $debt->payments
+                        ->sortBy(fn (DebtPayment $payment): array => [
+                            $payment->installment_no ?? PHP_INT_MAX,
+                            $payment->occurred_on?->toDateString() ?? '',
+                        ])
+                        ->values()
+                        ->map(fn (DebtPayment $payment): array => [
+                            'id' => $payment->id,
+                            'occurred_on' => $payment->occurred_on->toDateString(),
+                            'covers_on' => CoverTag::on($payment->notes, $payment->occurred_on)?->toDateString(),
+                            'amount' => (float) $payment->amount,
+                            'installment_no' => $payment->installment_no,
+                            'notes' => CoverTag::strip(PayTag::strip($payment->notes)),
+                        ])
+                        ->all(),
                 ];
             })
             ->values();

@@ -51,6 +51,15 @@ interface ComputedBillRow {
     payment: BillPayment | null
 }
 
+interface LoanPayment {
+    id: number
+    occurred_on: string
+    covers_on: string | null
+    amount: number
+    installment_no: number | null
+    notes: string | null
+}
+
 interface LoanRow {
     id: number
     name: string
@@ -65,6 +74,7 @@ interface LoanRow {
     spent_this_period: number
     due_label: string | null
     covers_on: string
+    payments?: LoanPayment[]
 }
 
 interface CreditDueRow {
@@ -272,6 +282,16 @@ function creditDueRow(bill: ComputedBillRow | null, due: CreditDueRow): CreditSh
         paid: due.paid_on !== null,
     }
 }
+const viewingLoan = ref<LoanRow | null>(null)
+const viewingLoanOpen = computed({
+    get: () => viewingLoan.value !== null,
+    set: (open) => {
+        if (! open) {
+            viewingLoan.value = null
+        }
+    },
+})
+
 const paying = ref<{
     kind: 'bill' | 'loan' | 'credit_due'
     id: number | string
@@ -655,9 +675,16 @@ function halfHref(half?: number) {
                         <td class="num whitespace-nowrap px-3 py-1.5 text-right">{{ pesos(loan.balance) }}</td>
                         <td class="whitespace-nowrap px-3 py-1.5 text-right">
                             <button
+                                type="button"
+                                class="text-moss hover:text-ink"
+                                @click="viewingLoan = loan"
+                            >
+                                Logs
+                            </button>
+                            <button
                                 v-if="! loan.paid_this_period && loan.status !== 'paid'"
                                 type="button"
-                                class="text-accent hover:text-ink"
+                                class="ml-3 text-accent hover:text-ink"
                                 @click="openPay('loan', loan.id, loan.name, loan.installment_amount ?? 0, loan.covers_on)"
                             >
                                 Pay
@@ -705,6 +732,35 @@ function halfHref(half?: number) {
                 </tbody>
             </table>
         </DashPanel>
+
+        <Modal v-if="viewingLoan" v-model="viewingLoanOpen" :title="`${viewingLoan.name} payments`">
+            <table class="data-table">
+                <caption class="sr-only">Payments for {{ viewingLoan.name }}</caption>
+                <thead>
+                    <tr>
+                        <th scope="col">Date</th>
+                        <th scope="col" class="text-right">Amount</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr v-if="! viewingLoan.payments?.length">
+                        <td colspan="2" class="text-moss">No payments yet.</td>
+                    </tr>
+                    <tr v-for="payment in viewingLoan.payments" :key="payment.id">
+                        <td>
+                            <template v-if="payment.installment_no">#{{ payment.installment_no }} · </template>
+                            {{ prettyDate(payment.occurred_on) }}
+                            <span
+                                v-if="payment.covers_on && payment.covers_on !== payment.occurred_on"
+                                class="text-moss"
+                            > · covers {{ prettyDate(payment.covers_on) }}</span>
+                            <span v-if="payment.notes" class="text-moss"> · {{ payment.notes }}</span>
+                        </td>
+                        <td class="num text-right">{{ pesos(payment.amount) }}</td>
+                    </tr>
+                </tbody>
+            </table>
+        </Modal>
 
         <Modal v-if="paying" v-model="payOpen" :title="`${editingPay ? 'Edit' : 'Pay'} ${paying.name}`">
             <form class="grid gap-3" @submit.prevent="submitPay">
