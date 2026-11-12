@@ -130,18 +130,28 @@ const props = defineProps<{
 const credits = computed(() => props.wallets.filter((row): row is WalletRow & CreditOption => row.group === 'credit'))
 const planBills = computed(() => props.bills.filter((bill) => bill.plan > 0))
 const cashBills = computed(() => planBills.value.reduce((sum, bill) => sum + (bill.paid ? bill.spent : bill.plan), 0))
+const billsLeft = computed(() => Math.round(planBills.value
+    .filter((bill) => ! bill.paid)
+    .reduce((sum, bill) => sum + bill.plan, 0) * 100) / 100)
 const creditDue = computed(() => props.computed_bills.reduce((sum, bill) => sum + bill.plan, 0))
+const creditLeft = computed(() => Math.round(props.computed_bills
+    .filter((bill) => bill.plan > 0 && ! bill.paid)
+    .reduce((sum, bill) => sum + bill.plan, 0) * 100) / 100)
 const estimatedTotal = computed(() => Math.round((cashBills.value + creditDue.value + props.totals.loan) * 100) / 100)
-const billsPaid = computed(() => planBills.value.length > 0 && planBills.value.every((bill) => bill.paid))
+const billsPaid = computed(() => planBills.value.length > 0 && billsLeft.value <= 0)
 const creditDueBills = computed(() => props.computed_bills.filter((bill) => bill.plan > 0))
-const creditPaid = computed(() => creditDueBills.value.length > 0 && creditDueBills.value.every((bill) => bill.paid))
+const creditPaid = computed(() => creditDueBills.value.length > 0 && creditLeft.value <= 0)
 const loansDue = computed(() => props.loans.filter((loan) => loan.due_this_period && loan.status !== 'paid'))
-const loansPaid = computed(() => loansDue.value.length > 0 && loansDue.value.every((loan) => loan.paid_this_period))
+const loansLeft = computed(() => Math.round(loansDue.value
+    .filter((loan) => ! loan.paid_this_period)
+    .reduce((sum, loan) => sum + (loan.installment_amount ?? 0), 0) * 100) / 100)
+const loansPaid = computed(() => loansDue.value.length > 0 && loansLeft.value <= 0)
 
 const overview = computed<OverviewTile[]>(() => [
     {
         label: 'Bills',
         value: pesos(cashBills.value),
+        hint: `left ${pesos(billsLeft.value)}`,
         badge: billsPaid.value ? 'Paid' : undefined,
         icon: 'bills',
         wrap: 'bg-[#EEEBFF] text-accent',
@@ -149,6 +159,7 @@ const overview = computed<OverviewTile[]>(() => [
     {
         label: 'Credit',
         value: pesos(creditDue.value),
+        hint: `left ${pesos(creditLeft.value)}`,
         badge: creditPaid.value ? 'Paid' : undefined,
         icon: 'wallet',
         wrap: 'bg-[#FFF1E8] text-[#E67E22]',
@@ -156,6 +167,7 @@ const overview = computed<OverviewTile[]>(() => [
     {
         label: 'Loans',
         value: pesos(props.totals.loan),
+        hint: `left ${pesos(loansLeft.value)}`,
         badge: loansPaid.value ? 'Paid' : undefined,
         icon: 'lock',
         wrap: 'bg-[#E8F1FF] text-income',

@@ -229,17 +229,18 @@ const secondPay = computed(() => {
     }
 })
 
-const billsPaid = computed(() => props.cash_bills.length > 0 && props.cash_bills.every((row) => row.paid))
-const creditPaid = computed(() => {
-    const rows = props.dues.filter((due) => due.kind === 'credit')
-
-    return rows.length > 0 && rows.every((due) => due.paid)
-})
-const loanPaid = computed(() => {
-    const rows = props.dues.filter((due) => due.kind === 'loan')
-
-    return rows.length > 0 && rows.every((due) => due.paid)
-})
+const billsLeft = computed(() => Math.round(props.cash_bills
+    .filter((row) => ! row.paid)
+    .reduce((sum, row) => sum + row.amount, 0) * 100) / 100)
+const creditLeft = computed(() => Math.round(props.dues
+    .filter((due) => due.kind === 'credit' && ! due.paid)
+    .reduce((sum, due) => sum + due.amount, 0) * 100) / 100)
+const loanLeft = computed(() => Math.round(props.dues
+    .filter((due) => due.kind === 'loan' && ! due.paid)
+    .reduce((sum, due) => sum + due.amount, 0) * 100) / 100)
+const billsPaid = computed(() => props.cash_bills.length > 0 && billsLeft.value <= 0)
+const creditPaid = computed(() => props.dues.some((due) => due.kind === 'credit') && creditLeft.value <= 0)
+const loanPaid = computed(() => props.dues.some((due) => due.kind === 'loan') && loanLeft.value <= 0)
 
 const overview = computed<OverviewTile[]>(() => [
     {
@@ -257,6 +258,7 @@ const overview = computed<OverviewTile[]>(() => [
     {
         label: 'Bills',
         value: pesos(props.figures.view_bills),
+        hint: `left ${pesos(billsLeft.value)}`,
         badge: billsPaid.value ? 'Paid' : undefined,
         icon: 'bills',
         wrap: 'bg-[#EEEBFF] text-accent',
@@ -264,6 +266,7 @@ const overview = computed<OverviewTile[]>(() => [
     {
         label: 'Credit',
         value: pesos(props.figures.view_credit),
+        hint: `left ${pesos(creditLeft.value)}`,
         badge: creditPaid.value ? 'Paid' : undefined,
         icon: 'wallet',
         wrap: 'bg-[#FFF1E8] text-[#E67E22]',
@@ -271,6 +274,7 @@ const overview = computed<OverviewTile[]>(() => [
     {
         label: 'Loan',
         value: pesos(props.figures.view_loan),
+        hint: `left ${pesos(loanLeft.value)}`,
         badge: loanPaid.value ? 'Paid' : undefined,
         icon: 'lock',
         wrap: 'bg-[#E8F1FF] text-income',
